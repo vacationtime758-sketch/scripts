@@ -1,0 +1,315 @@
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local Lighting = game:GetService("Lighting")
+local Workspace = game:GetService("Workspace")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
+
+local HitboxEnabled = false
+local HitboxVisible = false
+local InvisibilityEnabled = false
+local FakeChar = nil
+local HitboxSize = 10
+local HitboxTransparency = 0.9
+local HitboxVersion = 1
+local TargetName = ""
+
+local Keybinds = {
+    Hitbox = Enum.KeyCode.F1,
+    HitboxVisible = Enum.KeyCode.F2,
+    Invisibility = Enum.KeyCode.F3,
+    ToggleUI = Enum.KeyCode.Insert
+}
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "Pulse"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.IgnoreGuiInset = true
+ScreenGui.Parent = game:GetService("CoreGui")
+
+local Frame = Instance.new("Frame")
+Frame.Name = "Pulse"
+Frame.Size = UDim2.new(0, 260, 0, 310) 
+Frame.Position = UDim2.new(1, -270, 1, -320)
+Frame.BackgroundColor3 = Color3.fromRGB(25,25,25)
+Frame.BorderSizePixel = 0
+Frame.Parent = ScreenGui
+
+local UICorner = Instance.new("UICorner", Frame)
+UICorner.CornerRadius = UDim.new(0, 12)
+
+local UIStroke = Instance.new("UIStroke", Frame)
+UIStroke.Thickness = 3
+UIStroke.Color = Color3.fromRGB(90,90,90)
+
+local TitleLabel = Instance.new("TextLabel")
+TitleLabel.Size = UDim2.new(1, -10, 0, 35)
+TitleLabel.Position = UDim2.new(0, 5, 0, 5)
+TitleLabel.BackgroundTransparency = 1
+TitleLabel.TextColor3 = Color3.fromRGB(200,200,200)
+TitleLabel.Font = Enum.Font.SourceSansBold
+TitleLabel.TextSize = 24
+TitleLabel.Text = "- - -"
+TitleLabel.Parent = Frame
+
+local OptionsFrame = Instance.new("Frame")
+OptionsFrame.Size = UDim2.new(1, -10, 1, -130)
+OptionsFrame.Position = UDim2.new(0, 5, 0, 40)
+OptionsFrame.BackgroundTransparency = 1
+OptionsFrame.Parent = Frame
+
+local UIListLayout = Instance.new("UIListLayout", OptionsFrame)
+UIListLayout.FillDirection = Enum.FillDirection.Vertical
+UIListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+UIListLayout.VerticalAlignment = Enum.VerticalAlignment.Top
+UIListLayout.Padding = UDim.new(0, 6)
+
+local function createOptionRow(labelText, bindName)
+    local row = Instance.new("Frame")
+    row.Size = UDim2.new(1, -10, 0, 30)
+    row.BackgroundTransparency = 1
+    row.Parent = OptionsFrame
+
+    local hotkeyBox = Instance.new("TextButton")
+    hotkeyBox.Size = UDim2.new(0, 50, 1, 0)
+    hotkeyBox.BackgroundColor3 = Color3.fromRGB(50,50,50)
+    hotkeyBox.TextColor3 = Color3.fromRGB(200,200,200)
+    hotkeyBox.Font = Enum.Font.SourceSansBold
+    hotkeyBox.TextSize = 16
+    hotkeyBox.Text = Keybinds[bindName].Name
+    hotkeyBox.Parent = row
+
+    local hkCorner = Instance.new("UICorner", hotkeyBox)
+    hkCorner.CornerRadius = UDim.new(0, 6)
+
+    local label = Instance.new("TextButton")
+    label.Size = UDim2.new(1, -60, 1, 0)
+    label.Position = UDim2.new(0, 60, 0, 0)
+    label.BackgroundTransparency = 1
+    label.TextColor3 = Color3.fromRGB(255,255,255)
+    label.Font = Enum.Font.SourceSansBold
+    label.TextSize = 18
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Text = labelText
+    label.Parent = row
+
+    local rebinding = false
+    hotkeyBox.MouseButton1Click:Connect(function()
+        if rebinding then return end
+        rebinding = true
+        hotkeyBox.Text = "..."
+        local connection
+        connection = UserInputService.InputBegan:Connect(function(input, gpe)
+            if not gpe and input.KeyCode ~= Enum.KeyCode.Unknown then
+                Keybinds[bindName] = input.KeyCode
+                hotkeyBox.Text = input.KeyCode.Name
+                rebinding = false
+                connection:Disconnect()
+            end
+        end)
+    end)
+
+    return label, row
+end
+
+local HitboxLabel, HitboxRow = createOptionRow("Hitbox: OFF", "Hitbox")
+local HitboxVisLabel = createOptionRow("Hitbox Visibility: OFF", "HitboxVisible")
+local InvisLabel = createOptionRow("Invisibility: OFF", "Invisibility")
+
+local TargetRow = Instance.new("Frame")
+TargetRow.Size = UDim2.new(1, -10, 0, 30)
+TargetRow.BackgroundTransparency = 1
+TargetRow.Parent = OptionsFrame
+
+local TargetLabel = Instance.new("TextLabel")
+TargetLabel.Size = UDim2.new(0, 100, 1, 0)
+TargetLabel.BackgroundTransparency = 1
+TargetLabel.TextColor3 = Color3.fromRGB(255,255,255)
+TargetLabel.Font = Enum.Font.SourceSansBold
+TargetLabel.TextSize = 18
+TargetLabel.TextXAlignment = Enum.TextXAlignment.Left
+TargetLabel.Text = "Target:"
+TargetLabel.Parent = TargetRow
+
+local TargetBox = Instance.new("TextBox")
+TargetBox.Size = UDim2.new(1, -110, 1, -4)
+TargetBox.Position = UDim2.new(0, 110, 0, 2)
+TargetBox.BackgroundColor3 = Color3.fromRGB(40,40,40)
+TargetBox.TextColor3 = Color3.fromRGB(255,255,255)
+TargetBox.Font = Enum.Font.SourceSansBold
+TargetBox.TextSize = 16
+TargetBox.PlaceholderText = ""
+TargetBox.Text = ""
+TargetBox.ClearTextOnFocus = false
+TargetBox.Parent = TargetRow
+
+local targetCorner = Instance.new("UICorner", TargetBox)
+targetCorner.CornerRadius = UDim.new(0,6)
+
+TargetBox:GetPropertyChangedSignal("Text"):Connect(function()
+    TargetName = TargetBox.Text:lower()
+    updateAllHitboxes()
+end)
+
+local UnloadButton = Instance.new("TextButton")
+UnloadButton.Size = UDim2.new(1, -30, 0, 30)
+UnloadButton.Position = UDim2.new(0, 15, 1, -40)
+UnloadButton.BackgroundColor3 = Color3.fromRGB(70, 30, 30)
+UnloadButton.TextColor3 = Color3.fromRGB(255,255,255)
+UnloadButton.Font = Enum.Font.SourceSansBold
+UnloadButton.TextSize = 18
+UnloadButton.Text = "Unload"
+UnloadButton.Parent = Frame
+Instance.new("UICorner", UnloadButton).CornerRadius = UDim.new(0,8)
+
+UnloadButton.MouseButton1Click:Connect(function()
+    pcall(function() ScreenGui:Destroy() end)
+end)
+
+local hrpCache = {}
+
+local function updateHitbox(player, hrp)
+    if not hrp then return end
+
+    local shouldApplyHitbox = HitboxEnabled
+    if TargetName ~= "" then
+        shouldApplyHitbox = shouldApplyHitbox and player.Name:lower():find(TargetName)
+    end
+    
+    if not shouldApplyHitbox then
+        hrp.Size = Vector3.new(2,2,1)
+        hrp.Transparency = 1
+        hrp.Material = Enum.Material.Plastic
+        hrp.CanCollide = false
+        return
+    end
+
+    hrp.Size = Vector3.new(HitboxSize, HitboxSize, HitboxSize)
+    hrp.Transparency = HitboxVisible and HitboxTransparency or 1
+    hrp.Material = HitboxVisible and Enum.Material.Neon or Enum.Material.Plastic
+    hrp.CanCollide = false
+end
+
+function updateAllHitboxes()
+    for player, hrp in pairs(hrpCache) do
+        updateHitbox(player, hrp)
+    end
+end
+
+local function setHitboxEnabled(state)
+    HitboxEnabled = state
+    updateAllHitboxes()
+end
+
+local function setHitboxVisible(state)
+    HitboxVisible = state
+    updateAllHitboxes()
+end
+
+local function cachePlayerHRP(player)
+    local char = player.Character
+    if char then
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            hrpCache[player] = hrp
+            updateHitbox(player, hrp)
+        end
+    end
+    player.CharacterAdded:Connect(function(char)
+        local hrp = char:WaitForChild("HumanoidRootPart")
+        hrpCache[player] = hrp
+        updateHitbox(player, hrp)
+    end)
+end
+
+for _, p in ipairs(Players:GetPlayers()) do
+    if p ~= LocalPlayer then
+        cachePlayerHRP(p)
+    end
+end
+
+Players.PlayerAdded:Connect(function(p)
+    if p ~= LocalPlayer then
+        cachePlayerHRP(p)
+    end
+end)
+
+Players.PlayerRemoving:Connect(function(p)
+    hrpCache[p] = nil
+end)
+
+local function enableInvisibility()
+    if not LocalPlayer.Character then return end
+    local character = LocalPlayer.Character
+    local root = character:FindFirstChild("HumanoidRootPart")
+    if root then
+        FakeChar = root:Clone()
+        FakeChar.Parent = Workspace
+        FakeChar.Anchored = false
+        FakeChar.CanCollide = false
+    end
+    character.Parent = Lighting
+    InvisibilityEnabled = true
+end
+
+local function disableInvisibility()
+    if FakeChar then
+        FakeChar:Destroy()
+        FakeChar = nil
+    end
+    if LocalPlayer.Character then
+        LocalPlayer.Character.Parent = Workspace
+    end
+    InvisibilityEnabled = false
+end
+
+local SizeBox = Instance.new("TextBox")
+SizeBox.Size = UDim2.new(0, 50, 1, -4)
+SizeBox.Position = UDim2.new(1, -55, 0, 2)
+SizeBox.BackgroundColor3 = Color3.fromRGB(40,40,40)
+SizeBox.TextColor3 = Color3.fromRGB(255,255,255)
+SizeBox.Font = Enum.Font.SourceSansBold
+SizeBox.TextSize = 16
+SizeBox.Text = tostring(HitboxSize)
+SizeBox.ClearTextOnFocus = false
+SizeBox.Parent = HitboxRow
+
+local sizeCorner = Instance.new("UICorner", SizeBox)
+sizeCorner.CornerRadius = UDim.new(0,6)
+
+SizeBox.FocusLost:Connect(function()
+    local newSize = tonumber(SizeBox.Text)
+    if newSize and newSize > 0 then
+        HitboxSize = newSize
+        updateAllHitboxes()
+    else
+        SizeBox.Text = tostring(HitboxSize)
+    end
+end)
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+
+    if input.KeyCode == Keybinds.Hitbox then
+        setHitboxEnabled(not HitboxEnabled)
+        HitboxLabel.Text = "Hitbox: " .. (HitboxEnabled and "ON" or "OFF")
+
+    elseif input.KeyCode == Keybinds.HitboxVisible then
+        setHitboxVisible(not HitboxVisible)
+        HitboxVisLabel.Text = "Hitbox Visibility: " .. (HitboxVisible and "ON" or "OFF")
+
+    elseif input.KeyCode == Keybinds.Invisibility then
+        if InvisibilityEnabled then
+            disableInvisibility()
+            InvisLabel.Text = "Invisibility: OFF"
+        else
+            enableInvisibility()
+            InvisLabel.Text = "Invisibility: ON"
+        end
+
+    elseif input.KeyCode == Keybinds.ToggleUI then
+        Frame.Visible = not Frame.Visible
+    end
+end)
