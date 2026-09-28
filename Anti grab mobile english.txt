@@ -1,0 +1,257 @@
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+
+----------------------------------------------------
+-- 1. MAIN CONTAINER
+----------------------------------------------------
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "CombinedMenuGui"
+ScreenGui.ResetOnSpawn = false
+
+local parentTarget = gethui and gethui() or (CoreGui and CoreGui) or LocalPlayer:WaitForChild("PlayerGui")
+ScreenGui.Parent = parentTarget
+
+----------------------------------------------------
+-- 2. MINI TELEPORT MENU (POINT)
+----------------------------------------------------
+local MainFrame = Instance.new("Frame")
+MainFrame.Size = UDim2.new(0, 180, 0, 150)
+MainFrame.Position = UDim2.new(0.05, 0, 0.3, 0)
+MainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+MainFrame.Active = true
+MainFrame.Draggable = true
+MainFrame.Parent = ScreenGui
+
+local frameCorner = Instance.new("UICorner")
+frameCorner.CornerRadius = UDim.new(0, 8)
+frameCorner.Parent = MainFrame
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, 0, 0, 28)
+Title.Text = "POINT TP"
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+Title.Font = Enum.Font.SourceSansBold
+Title.TextSize = 15
+Title.Parent = MainFrame
+
+local titleCorner = Instance.new("UICorner")
+titleCorner.CornerRadius = UDim.new(0, 8)
+titleCorner.Parent = Title
+
+local CloseBtn = Instance.new("TextButton")
+CloseBtn.Size = UDim2.new(0, 22, 0, 22)
+CloseBtn.Position = UDim2.new(0.85, 0, 0.02, 0)
+CloseBtn.Text = "X"
+CloseBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+CloseBtn.BackgroundColor3 = Color3.fromRGB(180, 40, 40)
+CloseBtn.Font = Enum.Font.SourceSansBold
+CloseBtn.Parent = MainFrame
+
+local closeCorner = Instance.new("UICorner")
+closeCorner.CornerRadius = UDim.new(1, 0)
+closeCorner.Parent = CloseBtn
+
+local StatusLabel = Instance.new("TextLabel")
+StatusLabel.Size = UDim2.new(0.9, 0, 0, 25)
+StatusLabel.Position = UDim2.new(0.05, 0, 0.28, 0)
+StatusLabel.Text = "Status: Not Set"
+StatusLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+StatusLabel.BackgroundTransparency = 1
+StatusLabel.Font = Enum.Font.SourceSans
+StatusLabel.TextSize = 13
+StatusLabel.Parent = MainFrame
+
+local ResetBtn = Instance.new("TextButton")
+ResetBtn.Size = UDim2.new(0.9, 0, 0, 32)
+ResetBtn.Position = UDim2.new(0.05, 0, 0.50, 0)
+ResetBtn.Text = "🔄 Reset Point"
+ResetBtn.BackgroundColor3 = Color3.fromRGB(180, 50, 50)
+ResetBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+ResetBtn.Font = Enum.Font.SourceSansBold
+ResetBtn.TextSize = 14
+ResetBtn.Parent = MainFrame
+
+local resetCorner = Instance.new("UICorner")
+resetCorner.CornerRadius = UDim.new(0, 6)
+resetCorner.Parent = ResetBtn
+
+local MenuTpBtn = Instance.new("TextButton")
+MenuTpBtn.Size = UDim2.new(0.9, 0, 0, 32)
+MenuTpBtn.Position = UDim2.new(0.05, 0, 0.74, 0)
+MenuTpBtn.Text = "⚡ Go to Point"
+MenuTpBtn.BackgroundColor3 = Color3.fromRGB(0, 140, 220)
+MenuTpBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+MenuTpBtn.Font = Enum.Font.SourceSansBold
+MenuTpBtn.TextSize = 14
+MenuTpBtn.Parent = MainFrame
+
+local menuTpCorner = Instance.new("UICorner")
+menuTpCorner.CornerRadius = UDim.new(0, 6)
+menuTpCorner.Parent = MenuTpBtn
+
+----------------------------------------------------
+-- 3. FLOATING BUTTONS AND CANNON
+----------------------------------------------------
+-- Open TP Menu Button (📜)
+local OpenMenuBtn = Instance.new("TextButton")
+OpenMenuBtn.Size = UDim2.new(0, 45, 0, 45)
+OpenMenuBtn.Position = UDim2.new(0.02, 0, 0.4, 0)
+OpenMenuBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+OpenMenuBtn.Text = "📜"
+OpenMenuBtn.TextSize = 20
+OpenMenuBtn.Visible = false
+OpenMenuBtn.Active = true
+OpenMenuBtn.Draggable = true
+OpenMenuBtn.Parent = ScreenGui
+
+local openCorner = Instance.new("UICorner")
+openCorner.CornerRadius = UDim.new(1, 0)
+openCorner.Parent = OpenMenuBtn
+
+-- Floating Point TP Button (📌 / ⚡)
+local FloatTpBtn = Instance.new("TextButton")
+FloatTpBtn.Size = UDim2.new(0, 50, 0, 50)
+FloatTpBtn.Position = UDim2.new(0.02, 0, 0.5, 0)
+FloatTpBtn.BackgroundColor3 = Color3.fromRGB(240, 180, 0)
+FloatTpBtn.Text = "📌"
+FloatTpBtn.TextSize = 20
+FloatTpBtn.Active = true
+FloatTpBtn.Draggable = true
+FloatTpBtn.Parent = ScreenGui
+
+local floatCorner = Instance.new("UICorner")
+floatCorner.CornerRadius = UDim.new(1, 0)
+floatCorner.Parent = FloatTpBtn
+
+local UIStroke1 = Instance.new("UIStroke")
+UIStroke1.Thickness = 2
+UIStroke1.Color = Color3.fromRGB(255, 255, 255)
+UIStroke1.Parent = FloatTpBtn
+
+-- Floating Go to Cannon Button
+local CannonBtn = Instance.new("TextButton")
+CannonBtn.Name = "CannonButton"
+CannonBtn.Size = UDim2.new(0, 130, 0, 45)
+CannonBtn.Position = UDim2.new(0.8, 0, 0.5, 0)
+CannonBtn.BackgroundColor3 = Color3.fromRGB(255, 40, 40)
+CannonBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+CannonBtn.Text = "GO TO CANNON"
+CannonBtn.TextScaled = true
+CannonBtn.Font = Enum.Font.SourceSansBold
+CannonBtn.Active = true
+CannonBtn.Draggable = true
+CannonBtn.Parent = ScreenGui
+
+local cannonCorner = Instance.new("UICorner")
+cannonCorner.CornerRadius = UDim.new(0, 8)
+cannonCorner.Parent = CannonBtn
+
+local UIStroke2 = Instance.new("UIStroke")
+UIStroke2.Thickness = 2
+UIStroke2.Color = Color3.fromRGB(0, 0, 0)
+UIStroke2.Parent = CannonBtn
+
+----------------------------------------------------
+-- 4. LOGIC AND FUNCTIONS
+----------------------------------------------------
+local savedCFrame = nil
+
+local function getRoot()
+    local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+    return char:FindFirstChild("HumanoidRootPart")
+end
+
+local function updateUI()
+    if savedCFrame then
+        StatusLabel.Text = "Status: Point Saved ✓"
+        StatusLabel.TextColor3 = Color3.fromRGB(80, 220, 80)
+        FloatTpBtn.Text = "⚡"
+        FloatTpBtn.BackgroundColor3 = Color3.fromRGB(40, 180, 40)
+    else
+        StatusLabel.Text = "Status: Not Set"
+        StatusLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+        FloatTpBtn.Text = "📌"
+        FloatTpBtn.BackgroundColor3 = Color3.fromRGB(240, 180, 0)
+    end
+end
+
+local function processTpAction()
+    local root = getRoot()
+    if not root then return end
+
+    if not savedCFrame then
+        savedCFrame = root.CFrame
+    else
+        root.CFrame = savedCFrame
+    end
+    updateUI()
+end
+
+FloatTpBtn.MouseButton1Click:Connect(processTpAction)
+MenuTpBtn.MouseButton1Click:Connect(processTpAction)
+
+ResetBtn.MouseButton1Click:Connect(function()
+    savedCFrame = nil
+    updateUI()
+end)
+
+CloseBtn.MouseButton1Click:Connect(function()
+    MainFrame.Visible = false
+    OpenMenuBtn.Visible = true
+end)
+
+OpenMenuBtn.MouseButton1Click:Connect(function()
+    MainFrame.Visible = true
+    OpenMenuBtn.Visible = false
+end)
+
+-- Cannon Logic
+local function tpAndActivateCannon()
+    local hrp = getRoot()
+    if not hrp then return end
+
+    local cannonTarget = nil
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA("Model") or obj:IsA("BasePart") then
+            local name = obj.Name:lower()
+            if (name:find("cannon") or name:find("cañon")) and not name:find("fito") then
+                cannonTarget = obj
+                break
+            end
+        end
+    end
+
+    if cannonTarget then
+        local targetPart = cannonTarget:IsA("Model") and cannonTarget.PrimaryPart or cannonTarget
+        if not targetPart and cannonTarget:IsA("Model") then
+            for _, p in ipairs(cannonTarget:GetDescendants()) do
+                if p:IsA("BasePart") then
+                    targetPart = p
+                    break
+                end
+            end
+        end
+        
+        if targetPart then
+            hrp.CFrame = targetPart.CFrame + Vector3.new(0, 3, 0)
+            task.wait(0.05)
+            
+            local prompt = cannonTarget:FindFirstChildWhichIsA("ProximityPrompt", true)
+            if prompt then
+                fireproximityprompt(prompt)
+            else
+                local click = cannonTarget:FindFirstChildWhichIsA("ClickDetector", true)
+                if click then
+                    fireclickdetector(click)
+                else
+                    firetouchinterest(hrp, targetPart, 0)
+                    task.wait(0.02)
+                    firetouchinterest(hrp, targetPart, 1)
+                end
+            end
+        end
+    end
+end
+
+CannonBtn.MouseButton1Click:Connect(tpAndActivateCannon)
