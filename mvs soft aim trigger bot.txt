@@ -1,0 +1,869 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+-- GUI Setup
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "TEOSoftaim"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+-- Main Frame
+local MainFrame = Instance.new("Frame")
+MainFrame.Size = UDim2.new(0, 260, 0, 520)
+MainFrame.Position = UDim2.new(0.7, 0, 0.08, 0)
+MainFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+MainFrame.BorderSizePixel = 0
+MainFrame.Active = true
+MainFrame.Draggable = true
+MainFrame.Parent = ScreenGui
+
+Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 8)
+
+-- Title
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, 0, 0, 35)
+Title.Text = "TEO SOFTAIM"
+Title.TextColor3 = Color3.fromRGB(0, 255, 255)
+Title.BackgroundColor3 = Color3.fromRGB(45, 45, 45)
+Title.Font = Enum.Font.SourceSansBold
+Title.TextSize = 20
+Title.Parent = MainFrame
+
+Instance.new("UICorner", Title).CornerRadius = UDim.new(0, 8)
+
+-- Close Button
+local CloseBtn = Instance.new("TextButton")
+CloseBtn.Size = UDim2.new(0, 25, 0, 25)
+CloseBtn.Position = UDim2.new(0.88, 0, 0.015, 0)
+CloseBtn.Text = "X"
+CloseBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+CloseBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+CloseBtn.Font = Enum.Font.SourceSansBold
+CloseBtn.Parent = MainFrame
+
+Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(1, 0)
+
+-- Status Label
+local StatusLabel = Instance.new("TextLabel")
+StatusLabel.Size = UDim2.new(0.9, 0, 0, 20)
+StatusLabel.Position = UDim2.new(0.05, 0, 0.075, 0)
+StatusLabel.Text = "Status: Waiting..."
+StatusLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+StatusLabel.BackgroundTransparency = 1
+StatusLabel.Font = Enum.Font.SourceSans
+StatusLabel.TextSize = 12
+StatusLabel.Parent = MainFrame
+
+-- Target Mode Label
+local TargetModeLabel = Instance.new("TextLabel")
+TargetModeLabel.Size = UDim2.new(0.9, 0, 0, 16)
+TargetModeLabel.Position = UDim2.new(0.05, 0, 0.11, 0)
+TargetModeLabel.Text = "Mode: TARGET EVERYONE"
+TargetModeLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+TargetModeLabel.BackgroundTransparency = 1
+TargetModeLabel.Font = Enum.Font.SourceSansBold
+TargetModeLabel.TextSize = 11
+TargetModeLabel.Parent = MainFrame
+
+-- Softaim Toggle
+local ToggleBtn = Instance.new("TextButton")
+ToggleBtn.Size = UDim2.new(0.9, 0, 0, 28)
+ToggleBtn.Position = UDim2.new(0.05, 0, 0.145, 0)
+ToggleBtn.Text = "SOFTAIM: OFF"
+ToggleBtn.BackgroundColor3 = Color3.fromRGB(150, 50, 50)
+ToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+ToggleBtn.Font = Enum.Font.SourceSansBold
+ToggleBtn.TextSize = 14
+ToggleBtn.Parent = MainFrame
+
+Instance.new("UICorner", ToggleBtn).CornerRadius = UDim.new(0, 6)
+
+-- Triggerbot Toggle
+local TriggerBtn = Instance.new("TextButton")
+TriggerBtn.Size = UDim2.new(0.9, 0, 0, 28)
+TriggerBtn.Position = UDim2.new(0.05, 0, 0.205, 0)
+TriggerBtn.Text = "TRIGGERBOT: OFF"
+TriggerBtn.BackgroundColor3 = Color3.fromRGB(150, 50, 50)
+TriggerBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+TriggerBtn.Font = Enum.Font.SourceSansBold
+TriggerBtn.TextSize = 14
+TriggerBtn.Parent = MainFrame
+
+Instance.new("UICorner", TriggerBtn).CornerRadius = UDim.new(0, 6)
+
+-- Wall Check Toggle
+local WallCheckBtn = Instance.new("TextButton")
+WallCheckBtn.Size = UDim2.new(0.9, 0, 0, 24)
+WallCheckBtn.Position = UDim2.new(0.05, 0, 0.265, 0)
+WallCheckBtn.Text = "Wall Check: ON"
+WallCheckBtn.BackgroundColor3 = Color3.fromRGB(50, 150, 50)
+WallCheckBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+WallCheckBtn.Font = Enum.Font.SourceSansBold
+WallCheckBtn.TextSize = 12
+WallCheckBtn.Parent = MainFrame
+
+Instance.new("UICorner", WallCheckBtn).CornerRadius = UDim.new(0, 6)
+
+-- ESP Toggle
+local ESPToggle = Instance.new("TextButton")
+ESPToggle.Size = UDim2.new(0.9, 0, 0, 28)
+ESPToggle.Position = UDim2.new(0.05, 0, 0.32, 0)
+ESPToggle.Text = "ESP (ALL): OFF"
+ESPToggle.BackgroundColor3 = Color3.fromRGB(150, 50, 50)
+ESPToggle.TextColor3 = Color3.fromRGB(255, 255, 255)
+ESPToggle.Font = Enum.Font.SourceSansBold
+ESPToggle.TextSize = 14
+ESPToggle.Parent = MainFrame
+
+Instance.new("UICorner", ESPToggle).CornerRadius = UDim.new(0, 6)
+
+-- Only In Match Toggle
+local MatchToggle = Instance.new("TextButton")
+MatchToggle.Size = UDim2.new(0.9, 0, 0, 22)
+MatchToggle.Position = UDim2.new(0.05, 0, 0.38, 0)
+MatchToggle.Text = "Only In Match: ON"
+MatchToggle.BackgroundColor3 = Color3.fromRGB(50, 150, 50)
+MatchToggle.TextColor3 = Color3.fromRGB(255, 255, 255)
+MatchToggle.Font = Enum.Font.SourceSansBold
+MatchToggle.TextSize = 12
+MatchToggle.Parent = MainFrame
+
+Instance.new("UICorner", MatchToggle).CornerRadius = UDim.new(0, 6)
+
+-- Avoid List Section
+local AvoidLabel = Instance.new("TextLabel")
+AvoidLabel.Size = UDim2.new(0.9, 0, 0, 18)
+AvoidLabel.Position = UDim2.new(0.05, 0, 0.435, 0)
+AvoidLabel.Text = "AVOID LIST (Names to Ignore):"
+AvoidLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
+AvoidLabel.BackgroundTransparency = 1
+AvoidLabel.Font = Enum.Font.SourceSansBold
+AvoidLabel.TextSize = 11
+AvoidLabel.Parent = MainFrame
+
+local AvoidBox = Instance.new("TextBox")
+AvoidBox.Size = UDim2.new(0.9, 0, 0, 35)
+AvoidBox.Position = UDim2.new(0.05, 0, 0.47, 0)
+AvoidBox.Text = ""
+AvoidBox.PlaceholderText = "friend1, friend2, player3..."
+AvoidBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+AvoidBox.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+AvoidBox.Font = Enum.Font.SourceSans
+AvoidBox.TextSize = 11
+AvoidBox.TextWrapped = true
+AvoidBox.ClearTextOnFocus = false
+AvoidBox.Parent = MainFrame
+
+Instance.new("UICorner", AvoidBox).CornerRadius = UDim.new(0, 4)
+
+local AvoidStatus = Instance.new("TextLabel")
+AvoidStatus.Size = UDim2.new(0.9, 0, 0, 16)
+AvoidStatus.Position = UDim2.new(0.05, 0, 0.525, 0)
+AvoidStatus.Text = "Avoiding: 0 players"
+AvoidStatus.TextColor3 = Color3.fromRGB(200, 200, 200)
+AvoidStatus.BackgroundTransparency = 1
+AvoidStatus.Font = Enum.Font.SourceSans
+AvoidStatus.TextSize = 10
+AvoidStatus.Parent = MainFrame
+
+-- Keybind
+local KeybindLabel = Instance.new("TextLabel")
+KeybindLabel.Size = UDim2.new(0.9, 0, 0, 16)
+KeybindLabel.Position = UDim2.new(0.05, 0, 0.565, 0)
+KeybindLabel.Text = "Toggle Key:"
+KeybindLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+KeybindLabel.BackgroundTransparency = 1
+KeybindLabel.Font = Enum.Font.SourceSans
+KeybindLabel.TextSize = 11
+KeybindLabel.Parent = MainFrame
+
+local KeybindBox = Instance.new("TextBox")
+KeybindBox.Size = UDim2.new(0.9, 0, 0, 24)
+KeybindBox.Position = UDim2.new(0.05, 0, 0.595, 0)
+KeybindBox.Text = "RightShift"
+KeybindBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+KeybindBox.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+KeybindBox.Font = Enum.Font.SourceSansBold
+KeybindBox.TextSize = 13
+KeybindBox.Parent = MainFrame
+
+Instance.new("UICorner", KeybindBox).CornerRadius = UDim.new(0, 4)
+
+-- Trigger Delay Slider
+local TriggerDelayLabel = Instance.new("TextLabel")
+TriggerDelayLabel.Size = UDim2.new(0.9, 0, 0, 16)
+TriggerDelayLabel.Position = UDim2.new(0.05, 0, 0.645, 0)
+TriggerDelayLabel.Text = "Trigger Delay: 50ms"
+TriggerDelayLabel.TextColor3 = Color3.fromRGB(255, 150, 50)
+TriggerDelayLabel.BackgroundTransparency = 1
+TriggerDelayLabel.Font = Enum.Font.SourceSans
+TriggerDelayLabel.TextSize = 11
+TriggerDelayLabel.Parent = MainFrame
+
+local TriggerDelaySlider = Instance.new("TextButton")
+TriggerDelaySlider.Size = UDim2.new(0.9, 0, 0, 18)
+TriggerDelaySlider.Position = UDim2.new(0.05, 0, 0.675, 0)
+TriggerDelaySlider.Text = ""
+TriggerDelaySlider.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+TriggerDelaySlider.AutoButtonColor = false
+TriggerDelaySlider.Parent = MainFrame
+
+Instance.new("UICorner", TriggerDelaySlider).CornerRadius = UDim.new(0, 4)
+
+local TriggerDelayFill = Instance.new("Frame")
+TriggerDelayFill.Size = UDim2.new(0.25, 0, 1, 0)
+TriggerDelayFill.BackgroundColor3 = Color3.fromRGB(255, 150, 50)
+TriggerDelayFill.BorderSizePixel = 0
+TriggerDelayFill.Parent = TriggerDelaySlider
+
+Instance.new("UICorner", TriggerDelayFill).CornerRadius = UDim.new(0, 4)
+
+-- Max Distance Slider
+local DistLabel = Instance.new("TextLabel")
+DistLabel.Size = UDim2.new(0.9, 0, 0, 16)
+DistLabel.Position = UDim2.new(0.05, 0, 0.715, 0)
+DistLabel.Text = "Max Distance: 100 studs"
+DistLabel.TextColor3 = Color3.fromRGB(255, 200, 100)
+DistLabel.BackgroundTransparency = 1
+DistLabel.Font = Enum.Font.SourceSans
+DistLabel.TextSize = 11
+DistLabel.Parent = MainFrame
+
+local DistSlider = Instance.new("TextButton")
+DistSlider.Size = UDim2.new(0.9, 0, 0, 18)
+DistSlider.Position = UDim2.new(0.05, 0, 0.745, 0)
+DistSlider.Text = ""
+DistSlider.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+DistSlider.AutoButtonColor = false
+DistSlider.Parent = MainFrame
+
+Instance.new("UICorner", DistSlider).CornerRadius = UDim.new(0, 4)
+
+local DistFill = Instance.new("Frame")
+DistFill.Size = UDim2.new(0.25, 0, 1, 0)
+DistFill.BackgroundColor3 = Color3.fromRGB(255, 200, 0)
+DistFill.BorderSizePixel = 0
+DistFill.Parent = DistSlider
+
+Instance.new("UICorner", DistFill).CornerRadius = UDim.new(0, 4)
+
+-- Aimbot Strength Slider
+local StrengthLabel = Instance.new("TextLabel")
+StrengthLabel.Size = UDim2.new(0.9, 0, 0, 16)
+StrengthLabel.Position = UDim2.new(0.05, 0, 0.785, 0)
+StrengthLabel.Text = "Aimbot Strength: 0.08"
+StrengthLabel.TextColor3 = Color3.fromRGB(0, 255, 255)
+StrengthLabel.BackgroundTransparency = 1
+StrengthLabel.Font = Enum.Font.SourceSans
+StrengthLabel.TextSize = 11
+StrengthLabel.Parent = MainFrame
+
+local StrengthSlider = Instance.new("TextButton")
+StrengthSlider.Size = UDim2.new(0.9, 0, 0, 18)
+StrengthSlider.Position = UDim2.new(0.05, 0, 0.815, 0)
+StrengthSlider.Text = ""
+StrengthSlider.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+StrengthSlider.AutoButtonColor = false
+StrengthSlider.Parent = MainFrame
+
+Instance.new("UICorner", StrengthSlider).CornerRadius = UDim.new(0, 4)
+
+local StrengthFill = Instance.new("Frame")
+StrengthFill.Size = UDim2.new(0.4, 0, 1, 0)
+StrengthFill.BackgroundColor3 = Color3.fromRGB(0, 255, 255)
+StrengthFill.BorderSizePixel = 0
+StrengthFill.Parent = StrengthSlider
+
+Instance.new("UICorner", StrengthFill).CornerRadius = UDim.new(0, 4)
+
+-- Detection Radius Slider
+local RadiusLabel = Instance.new("TextLabel")
+RadiusLabel.Size = UDim2.new(0.9, 0, 0, 16)
+RadiusLabel.Position = UDim2.new(0.05, 0, 0.855, 0)
+RadiusLabel.Text = "Detection Radius: 150"
+RadiusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+RadiusLabel.BackgroundTransparency = 1
+RadiusLabel.Font = Enum.Font.SourceSans
+RadiusLabel.TextSize = 11
+RadiusLabel.Parent = MainFrame
+
+local RadiusSlider = Instance.new("TextButton")
+RadiusSlider.Size = UDim2.new(0.9, 0, 0, 18)
+RadiusSlider.Position = UDim2.new(0.05, 0, 0.885, 0)
+RadiusSlider.Text = ""
+RadiusSlider.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+RadiusSlider.AutoButtonColor = false
+RadiusSlider.Parent = MainFrame
+
+Instance.new("UICorner", RadiusSlider).CornerRadius = UDim.new(0, 4)
+
+local RadiusFill = Instance.new("Frame")
+RadiusFill.Size = UDim2.new(0.5, 0, 1, 0)
+RadiusFill.BackgroundColor3 = Color3.fromRGB(255, 100, 100)
+RadiusFill.BorderSizePixel = 0
+RadiusFill.Parent = RadiusSlider
+
+Instance.new("UICorner", RadiusFill).CornerRadius = UDim.new(0, 4)
+
+-- Detection Radius Circle
+local radiusCircle = Instance.new("Frame")
+radiusCircle.Size = UDim2.new(0, 300, 0, 300)
+radiusCircle.Position = UDim2.new(0.5, -150, 0.5, -150)
+radiusCircle.BackgroundTransparency = 1
+radiusCircle.Visible = false
+radiusCircle.Parent = ScreenGui
+
+local circleStroke = Instance.new("UIStroke")
+circleStroke.Thickness = 1.5
+circleStroke.Color = Color3.fromRGB(255, 100, 100)
+circleStroke.Transparency = 0.6
+circleStroke.Parent = radiusCircle
+
+Instance.new("UICorner", radiusCircle).CornerRadius = UDim.new(1, 0)
+
+-- Open Button
+local OpenBtn = Instance.new("TextButton")
+OpenBtn.Size = UDim2.new(0, 50, 0, 50)
+OpenBtn.Position = UDim2.new(0.02, 0, 0.5, 0)
+OpenBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 150)
+OpenBtn.Text = "TEO"
+OpenBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+OpenBtn.Font = Enum.Font.SourceSansBold
+OpenBtn.TextSize = 16
+OpenBtn.Visible = false
+OpenBtn.Active = true
+OpenBtn.Draggable = true
+OpenBtn.Parent = ScreenGui
+
+Instance.new("UICorner", OpenBtn).CornerRadius = UDim.new(1, 0)
+
+-- ESP Container
+local ESPContainer = Instance.new("Folder")
+ESPContainer.Name = "ESP"
+ESPContainer.Parent = ScreenGui
+
+-- Variables
+local softaimEnabled = false
+local triggerbotEnabled = false
+local wallCheckEnabled = true
+local espEnabled = false
+local onlyInMatch = true
+local currentKeybind = Enum.KeyCode.RightShift
+local aimbotStrength = 0.08
+local detectionRadius = 150
+local maxDistance = 100
+local triggerDelay = 0.05
+local isMatchActive = false
+local currentTarget = nil
+local lastShot = 0
+local isOnTarget = false
+local avoidList = {}
+
+-- Cache for ESP only (not for triggerbot)
+local playerCache = {}
+local visibilityCache = {}
+
+-- Parse avoid list
+local function updateAvoidList()
+    local text = AvoidBox.Text
+    avoidList = {}
+    for name in text:gmatch("[^,]+") do
+        name = name:gsub("^%s+", ""):gsub("%s+$", "")
+        if name ~= "" then
+            table.insert(avoidList, name:lower())
+        end
+    end
+    AvoidStatus.Text = "Avoiding: " .. #avoidList .. " player" .. (#avoidList == 1 and "" or "s")
+end
+
+AvoidBox.FocusLost:Connect(updateAvoidList)
+
+-- Check if player should be avoided
+local function shouldAvoid(player)
+    local playerName = player.Name:lower()
+    local displayName = player.DisplayName:lower()
+    for _, avoidName in ipairs(avoidList) do
+        if playerName:find(avoidName) or displayName:find(avoidName) then
+            return true
+        end
+    end
+    return false
+end
+
+-- Functions
+local function updateStatus(text, color)
+    StatusLabel.Text = text
+    StatusLabel.TextColor3 = color or Color3.fromRGB(200, 200, 200)
+end
+
+local function getKeyCodeFromString(str)
+    str = str:gsub("%s+", "")
+    for _, key in pairs(Enum.KeyCode:GetEnumItems()) do
+        if key.Name:lower() == str:lower() then
+            return key
+        end
+    end
+    return nil
+end
+
+-- Check match status (throttled)
+task.spawn(function()
+    while true do
+        task.wait(1)
+        local hasTarget = false
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer and player.Character then
+                local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
+                if humanoid and humanoid.Health > 0 then
+                    hasTarget = true
+                    break
+                end
+            end
+        end
+        if isMatchActive ~= hasTarget then
+            isMatchActive = hasTarget
+            updateStatus(isMatchActive and "Match Active!" or "Waiting...", isMatchActive and Color3.fromRGB(50, 255, 50) or Color3.fromRGB(200, 200, 200))
+        end
+    end
+end)
+
+-- Get distance (cached for performance)
+local function getDistance(player)
+    if not playerCache[player] then playerCache[player] = {} end
+    local now = tick()
+    if playerCache[player].distTime and now - playerCache[player].distTime < 0.1 then
+        return playerCache[player].dist
+    end
+    
+    local myChar = LocalPlayer.Character
+    local theirChar = player.Character
+    if not myChar or not theirChar then 
+        playerCache[player].dist = math.huge
+        playerCache[player].distTime = now
+        return math.huge 
+    end
+    
+    local myRoot = myChar:FindFirstChild("HumanoidRootPart")
+    local theirRoot = theirChar:FindFirstChild("HumanoidRootPart")
+    if not myRoot or not theirRoot then 
+        playerCache[player].dist = math.huge
+        playerCache[player].distTime = now
+        return math.huge 
+    end
+    
+    local dist = (myRoot.Position - theirRoot.Position).Magnitude
+    playerCache[player].dist = dist
+    playerCache[player].distTime = now
+    return dist
+end
+
+-- REAL-TIME wall check for triggerbot (NO CACHE)
+local function isPlayerVisibleRealTime(player)
+    if not player.Character then return false end
+    
+    local myPos = Camera.CFrame.Position
+    local character = player.Character
+    local head = character:FindFirstChild("Head")
+    
+    if not head then return false end
+    
+    -- Raycast from camera to head
+    local direction = (head.Position - myPos)
+    local distance = direction.Magnitude
+    direction = direction.Unit
+    
+    local raycastParams = RaycastParams.new()
+    raycastParams.FilterDescendantsInstances = {LocalPlayer.Character, character}
+    raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+    raycastParams.IgnoreWater = true
+    
+    local result = workspace:Raycast(myPos, direction * distance, raycastParams)
+    
+    -- If no hit, player is visible
+    if not result then return true end
+    
+    -- If hit something transparent, still visible
+    if result.Instance.Transparency > 0.9 then return true end
+    
+    -- Blocked by wall
+    return false
+end
+
+-- Cached wall check for ESP only
+local function isPlayerVisibleCached(player)
+    local now = tick()
+    if visibilityCache[player] and now - visibilityCache[player].time < 0.2 then
+        return visibilityCache[player].visible
+    end
+    
+    local visible = isPlayerVisibleRealTime(player)
+    visibilityCache[player] = {time = now, visible = visible}
+    return visible
+end
+
+-- Check if valid target
+local function isValidTarget(target)
+    if not target or not target.Parent then return false end
+    local character = target.Parent
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    local plr = Players:FindFirstChild(character.Name)
+    
+    if not humanoid or humanoid.Health <= 0 then return false end
+    if not plr then return false end
+    if shouldAvoid(plr) then return false end
+    if getDistance(plr) > maxDistance then return false end
+    return true
+end
+
+-- Check crosshair on target with REAL-TIME wall check for triggerbot
+local function isCrosshairOnTarget()
+    local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player == LocalPlayer then continue end
+        if shouldAvoid(player) then continue end
+        
+        if player.Character then
+            local dist = getDistance(player)
+            if dist > maxDistance then continue end
+            
+            local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
+            local head = player.Character:FindFirstChild("Head")
+            
+            if not humanoid or humanoid.Health <= 0 then continue end
+            
+            if head then
+                local pos, onScreen = Camera:WorldToViewportPoint(head.Position)
+                if onScreen then
+                    local screenDist = (Vector2.new(pos.X, pos.Y) - center).Magnitude
+                    if screenDist < 20 then
+                        -- REAL-TIME wall check - NO CACHE for triggerbot
+                        if wallCheckEnabled and not isPlayerVisibleRealTime(player) then
+                            return false, nil, nil -- Wall blocked, don't shoot
+                        end
+                        return true, head, player
+                    end
+                end
+            end
+        end
+    end
+    return false, nil, nil
+end
+
+-- ESP Objects (reusable)
+local espObjects = {}
+
+local function getESP(player)
+    if espObjects[player] then return espObjects[player] end
+    
+    local espFrame = Instance.new("BillboardGui")
+    espFrame.Name = player.Name .. "_ESP"
+    espFrame.Size = UDim2.new(0, 100, 0, 45)
+    espFrame.StudsOffset = Vector3.new(0, 3, 0)
+    espFrame.AlwaysOnTop = true
+    espFrame.Parent = ESPContainer
+    
+    local nameLabel = Instance.new("TextLabel")
+    nameLabel.Size = UDim2.new(1, 0, 0.4, 0)
+    nameLabel.Text = player.Name
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.Font = Enum.Font.SourceSansBold
+    nameLabel.TextSize = 14
+    nameLabel.Parent = espFrame
+    
+    local distLabel = Instance.new("TextLabel")
+    distLabel.Size = UDim2.new(1, 0, 0.3, 0)
+    distLabel.Position = UDim2.new(0, 0, 0.4, 0)
+    distLabel.Text = "0m"
+    distLabel.BackgroundTransparency = 1
+    distLabel.Font = Enum.Font.SourceSans
+    distLabel.TextSize = 12
+    distLabel.Parent = espFrame
+    
+    local statusLabel = Instance.new("TextLabel")
+    statusLabel.Size = UDim2.new(1, 0, 0.3, 0)
+    statusLabel.Position = UDim2.new(0, 0, 0.7, 0)
+    statusLabel.Text = ""
+    statusLabel.BackgroundTransparency = 1
+    statusLabel.Font = Enum.Font.SourceSansBold
+    statusLabel.TextSize = 10
+    statusLabel.Parent = espFrame
+    
+    espObjects[player] = {frame = espFrame, name = nameLabel, dist = distLabel, status = statusLabel}
+    return espObjects[player]
+end
+
+-- Get closest target
+local function getClosestTarget()
+    local closest = nil
+    local shortestDist = math.huge
+    local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player == LocalPlayer then continue end
+        if shouldAvoid(player) then continue end
+        
+        if player.Character then
+            local dist = getDistance(player)
+            if dist > maxDistance then continue end
+            
+            local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
+            local head = player.Character:FindFirstChild("Head")
+            
+            if not humanoid or humanoid.Health <= 0 then continue end
+            
+            if head then
+                local pos, onScreen = Camera:WorldToViewportPoint(head.Position)
+                if onScreen then
+                    local screenDist = (Vector2.new(pos.X, pos.Y) - center).Magnitude
+                    if screenDist < detectionRadius and screenDist < shortestDist then
+                        if wallCheckEnabled and not isPlayerVisibleCached(player) then continue end
+                        shortestDist = screenDist
+                        closest = head
+                    end
+                end
+            end
+        end
+    end
+    return closest
+end
+
+-- Main loop (single RenderStepped)
+local frameCount = 0
+RunService.RenderStepped:Connect(function()
+    frameCount = frameCount + 1
+    
+    -- ESP update (every 3rd frame)
+    if espEnabled and frameCount % 3 == 0 then
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player == LocalPlayer then continue end
+            
+            local esp = getESP(player)
+            local char = player.Character
+            if char then
+                local head = char:FindFirstChild("Head")
+                local humanoid = char:FindFirstChildOfClass("Humanoid")
+                
+                if head and humanoid and humanoid.Health > 0 then
+                    local dist = getDistance(player)
+                    local avoided = shouldAvoid(player)
+                    local visible = isPlayerVisibleCached(player)
+                    
+                    esp.frame.Adornee = head
+                    esp.frame.Enabled = dist <= maxDistance
+                    esp.dist.Text = math.floor(dist) .. "m"
+                    
+                    if avoided then
+                        esp.name.TextColor3 = Color3.fromRGB(100, 100, 100)
+                        esp.status.Text = "[AVOIDED]"
+                        esp.status.TextColor3 = Color3.fromRGB(150, 150, 150)
+                    elseif visible then
+                        esp.name.TextColor3 = Color3.fromRGB(255, 50, 50)
+                        esp.status.Text = "[TARGET]"
+                        esp.status.TextColor3 = Color3.fromRGB(0, 255, 0)
+                    else
+                        esp.name.TextColor3 = Color3.fromRGB(255, 150, 50)
+                        esp.status.Text = "[WALL]"
+                        esp.status.TextColor3 = Color3.fromRGB(255, 100, 100)
+                    end
+                else
+                    esp.frame.Enabled = false
+                end
+            else
+                esp.frame.Enabled = false
+            end
+        end
+    end
+    
+    -- Softaim (every frame for smoothness)
+    if softaimEnabled and (not onlyInMatch or isMatchActive) then
+        if not currentTarget or not isValidTarget(currentTarget) then
+            currentTarget = getClosestTarget()
+        end
+        
+        if currentTarget and currentTarget.Parent then
+            local targetPos = currentTarget.Position
+            local root = currentTarget.Parent:FindFirstChild("HumanoidRootPart")
+            if root then
+                targetPos = targetPos + (root.Velocity * 0.03)
+            end
+            local targetCFrame = CFrame.new(Camera.CFrame.Position, targetPos)
+            Camera.CFrame = Camera.CFrame:Lerp(targetCFrame, aimbotStrength)
+        end
+    end
+    
+    -- Triggerbot (every 2nd frame) with REAL-TIME wall check
+    if triggerbotEnabled and (not onlyInMatch or isMatchActive) and frameCount % 2 == 0 then
+        local onTarget, targetHead, targetPlayer = isCrosshairOnTarget()
+        
+        if onTarget and targetPlayer then
+            -- Double-check visibility in real-time before shooting
+            if not wallCheckEnabled or isPlayerVisibleRealTime(targetPlayer) then
+                local now = tick()
+                if now - lastShot >= triggerDelay then
+                    pcall(function()
+                        mouse1click()
+                    end)
+                    lastShot = now
+                    isOnTarget = true
+                end
+            else
+                isOnTarget = false
+            end
+        else
+            isOnTarget = false
+        end
+    end
+end)
+
+-- Cleanup on player leave
+Players.PlayerRemoving:Connect(function(player)
+    playerCache[player] = nil
+    visibilityCache[player] = nil
+    if espObjects[player] then
+        espObjects[player].frame:Destroy()
+        espObjects[player] = nil
+    end
+end)
+
+-- Toggle Functions
+local function toggleSoftaim()
+    softaimEnabled = not softaimEnabled
+    ToggleBtn.Text = softaimEnabled and "SOFTAIM: ON" or "SOFTAIM: OFF"
+    ToggleBtn.BackgroundColor3 = softaimEnabled and Color3.fromRGB(50, 150, 50) or Color3.fromRGB(150, 50, 50)
+    radiusCircle.Visible = softaimEnabled
+    if not softaimEnabled then currentTarget = nil end
+end
+
+local function toggleTriggerbot()
+    triggerbotEnabled = not triggerbotEnabled
+    TriggerBtn.Text = triggerbotEnabled and "TRIGGERBOT: ON" or "TRIGGERBOT: OFF"
+    TriggerBtn.BackgroundColor3 = triggerbotEnabled and Color3.fromRGB(50, 150, 50) or Color3.fromRGB(150, 50, 50)
+end
+
+local function toggleWallCheck()
+    wallCheckEnabled = not wallCheckEnabled
+    WallCheckBtn.Text = wallCheckEnabled and "Wall Check: ON" or "Wall Check: OFF"
+    WallCheckBtn.BackgroundColor3 = wallCheckEnabled and Color3.fromRGB(50, 150, 50) or Color3.fromRGB(150, 50, 50)
+end
+
+local function toggleESP()
+    espEnabled = not espEnabled
+    ESPToggle.Text = espEnabled and "ESP (ALL): ON" or "ESP (ALL): OFF"
+    ESPToggle.BackgroundColor3 = espEnabled and Color3.fromRGB(50, 150, 50) or Color3.fromRGB(150, 50, 50)
+    if not espEnabled then
+        for _, esp in pairs(espObjects) do
+            esp.frame.Enabled = false
+        end
+    end
+end
+
+-- Button Connections
+ToggleBtn.MouseButton1Click:Connect(toggleSoftaim)
+TriggerBtn.MouseButton1Click:Connect(toggleTriggerbot)
+WallCheckBtn.MouseButton1Click:Connect(toggleWallCheck)
+ESPToggle.MouseButton1Click:Connect(toggleESP)
+
+MatchToggle.MouseButton1Click:Connect(function()
+    onlyInMatch = not onlyInMatch
+    MatchToggle.Text = onlyInMatch and "Only In Match: ON" or "Only In Match: OFF"
+    MatchToggle.BackgroundColor3 = onlyInMatch and Color3.fromRGB(50, 150, 50) or Color3.fromRGB(100, 100, 100)
+end)
+
+CloseBtn.MouseButton1Click:Connect(function()
+    MainFrame.Visible = false
+    OpenBtn.Visible = true
+end)
+
+OpenBtn.MouseButton1Click:Connect(function()
+    MainFrame.Visible = true
+    OpenBtn.Visible = false
+end)
+
+KeybindBox.FocusLost:Connect(function()
+    local key = getKeyCodeFromString(KeybindBox.Text)
+    if key then
+        currentKeybind = key
+        KeybindBox.Text = key.Name
+        KeybindBox.TextColor3 = Color3.fromRGB(100, 255, 100)
+    else
+        KeybindBox.TextColor3 = Color3.fromRGB(255, 100, 100)
+    end
+end)
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if not gameProcessed and input.KeyCode == currentKeybind then
+        toggleSoftaim()
+    end
+end)
+
+-- Slider functions (properly cleaned up)
+local function setupSlider(slider, fill, callback)
+    local connection = nil
+    
+    local function update(input)
+        local sliderPos = slider.AbsolutePosition.X
+        local sliderSize = slider.AbsoluteSize.X
+        local mouseX = input.Position.X
+        local relativeX = math.clamp((mouseX - sliderPos) / sliderSize, 0, 1)
+        fill.Size = UDim2.new(relativeX, 0, 1, 0)
+        callback(relativeX)
+    end
+    
+    slider.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            update(input)
+            
+            if connection then connection:Disconnect() end
+            connection = RunService.RenderStepped:Connect(function()
+                if UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
+                    local pos = UserInputService:GetMouseLocation()
+                    update({Position = Vector2.new(pos.X, pos.Y)})
+                else
+                    connection:Disconnect()
+                    connection = nil
+                end
+            end)
+        end
+    end)
+end
+
+setupSlider(TriggerDelaySlider, TriggerDelayFill, function(rel)
+    triggerDelay = 0.01 + (rel * 0.29)
+    TriggerDelayLabel.Text = "Trigger Delay: " .. math.floor(triggerDelay * 1000) .. "ms"
+end)
+
+setupSlider(DistSlider, DistFill, function(rel)
+    maxDistance = math.floor(20 + (rel * 280))
+    DistLabel.Text = "Max Distance: " .. maxDistance .. " studs"
+end)
+
+setupSlider(StrengthSlider, StrengthFill, function(rel)
+    aimbotStrength = 0.01 + (rel * 0.19)
+    StrengthLabel.Text = string.format("Aimbot Strength: %.2f", aimbotStrength)
+end)
+
+setupSlider(RadiusSlider, RadiusFill, function(rel)
+    detectionRadius = math.floor(50 + (rel * 250))
+    RadiusLabel.Text = "Detection Radius: " .. detectionRadius
+    radiusCircle.Size = UDim2.new(0, detectionRadius * 2, 0, detectionRadius * 2)
+    radiusCircle.Position = UDim2.new(0.5, -detectionRadius, 0.5, -detectionRadius)
+end)
+
+-- Initial ESP setup
+for _, player in ipairs(Players:GetPlayers()) do
+    if player ~= LocalPlayer then
+        getESP(player)
+    end
+end
+
+Players.PlayerAdded:Connect(function(player)
+    if player ~= LocalPlayer then
+        getESP(player)
+    end
+end)
+
+print("TEO SOFTAIM loaded - Wall Check Fixed")
