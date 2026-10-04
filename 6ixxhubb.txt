@@ -1,0 +1,771 @@
+-- 6ixx Hub | Autoclicker + Head Sit + Hitbox + Anti-Ragdoll + Rainbow + Invisibility | Obsidian UI
+
+local repo = "https://raw.githubusercontent.com/deividcomsono/Obsidian/main/"
+local Library = loadstring(game:HttpGet(repo .. "Library.lua"))()
+local ThemeManager = loadstring(game:HttpGet(repo .. "addons/ThemeManager.lua"))()
+local SaveManager = loadstring(game:HttpGet(repo .. "addons/SaveManager.lua"))()
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local player = Players.LocalPlayer
+local Options = Library.Options
+local Toggles = Library.Toggles
+
+-- ==================== STATE ====================
+local sitTarget = nil
+local hitboxNames = {}
+local avoidNames = {}
+local clickAccumulator = 0
+local hitboxOriginals = setmetatable({}, { __mode = "k" })
+local antiRagdollConn = nil
+local antiRagdollAccum = 0
+local ragdollEvent = nil
+local hrpCache = {}
+local rainbowActive = false
+local rainbowSpeed = 6
+local rainbowConn = nil
+local invisOriginals = {}
+local invisActive = false
+
+-- ==================== HELPERS ====================
+local function getHumanoid()
+    local char = player.Character
+    return char and char:FindFirstChildOfClass("Humanoid")
+end
+
+local function getRoot()
+    local char = player.Character
+    return char and char:FindFirstChild("HumanoidRootPart")
+end
+
+local function getPlayer(name)
+    if not name or name == "" then return nil end
+    name = name:lower()
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= player
+            and (p.Name:lower():sub(1, #name) == name
+            or p.DisplayName:lower():sub(1, #name) == name) then
+            return p
+        end
+    end
+    return nil
+end
+
+local function isAvoided(p)
+    if #avoidNames == 0 then return false end
+    local n, d = p.Name:lower(), p.DisplayName:lower()
+    for _, frag in ipairs(avoidNames) do
+        if n:find(frag, 1, true) or d:find(frag, 1, true) then
+            return true
+        end
+    end
+    return false
+end
+
+-- HITBOX TARGET LOGIC:
+-- If TargetName is set → ONLY that person (ignore avoid)
+-- If TargetName is empty → Everyone EXCEPT avoid list
+local function isHitboxTarget(p)
+    -- If specific target name is set, ONLY that person gets hitbox
+    if Options.HitboxTargetName and Options.HitboxTargetName.Value ~= "" then
+        local target = Options.HitboxTargetName.Value:lower()
+        return p.Name:lower():find(target, 1, true) ~= nil
+    end
+    
+    -- No target specified → hitbox everyone NOT in avoid list
+    if isAvoided(p) then return false end
+    return true
+end
+
+local function restoreHRP(hrp)
+    local saved = hitboxOriginals[hrp]
+    if saved and hrp and hrp.Parent then
+        hrp.Size = saved.Size
+        hrp.Transparency = saved.Transparency
+        hrp.Material = saved.Material
+        hrp.Color = saved.Color
+        hrp.CanCollide = saved.CanCollide
+    end
+    hitboxOriginals[hrp] = nil
+end
+
+local function restoreAllHitboxes()
+    for hrp in pairs(hitboxOriginals) do
+        restoreHRP(hrp)
+    end
+end
+
+-- ==================== INVISIBILITY LOGIC ====================
+local function setInvisibility(enabled)
+    local char = player.Character
+    if not char then return end
+    
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    
+    for _, obj in ipairs(char:GetDescendants()) do
+        if obj:IsA("BasePart") then
+            -- Skip HRP for movement, shrink everything else
+            if obj ~= hrp then
+                if enabled then
+                    if not invisOriginals[obj] then
+                        invisOriginals[obj] = {
+                            Size = obj.Size,
+                            Transparency = obj.Transparency,
+                            Massless = obj.Massless
+                        }
+                    end
+                    -- Shrink to near-zero (invisible but still exists)
+                    obj.Size = Vector3.new(0.01, 0.01, 0.01)
+                    obj.Transparency = 1
+                    obj.Massless = true
+                else
+                    local saved = invisOriginals[obj]
+                    if saved then
+                        obj.Size = saved.Size
+                        obj.Transparency = saved.Transparency
+                        obj.Massless = saved.Massless
+                    end
+                end
+            end
+        elseif obj:IsA("MeshPart") and obj.Parent:IsA("Accessory") then
+            -- Hide accessories
+            if enabled then
+                if not invisOriginals[obj] then
+                    invisOriginals[obj] = {Transparency = obj.Transparency, Size = obj.Size}
+                end
+                obj.Transparency = 1
+                obj.Size = Vector3.new(0.01, 0.01, 0.01)
+            else
+                local saved = invisOriginals[obj]
+                if saved then
+                    obj.Transparency = saved.Transparency
+                    obj.Size = saved.Size
+                end
+            end
+        elseif obj:IsA("Decal") or obj:IsA("Texture") then
+            -- Hide face/clothing decals
+            if enabled then
+                if not invisOriginals[obj] then
+                    invisOriginals[obj] = {Transparency = obj.Transparency}
+                end
+                obj.Transparency = 1
+            else
+                local saved = invisOriginals[obj]
+                if saved then
+                    obj.Transparency = saved.Transparency
+                end
+            end
+        end
+    end
+    
+    -- Shrink HRP last and carefully
+    if hrp then
+        if enabled then
+            if not invisOriginals[hrp] then
+                invisOriginals[hrp] = {Size = hrp.Size, Transparency = hrp.Transparency}
+            end
+            hrp.Size = Vector3.new(0.01, 0.01, 0.01)
+            hrp.Transparency = 1
+        else
+            local saved = invisOriginals[hrp]
+            if saved then
+                hrp.Size = saved.Size
+                hrp.Transparency = saved.Transparency
+            else
+                hrp.Size = Vector3.new(2, 2, 1)
+                hrp.Transparency = 1
+            end
+        end
+    end
+    
+    invisActive = enabled
+end
+
+-- ==================== ANTI-RAGDOLL ====================
+local BAD_STATES = {
+    [Enum.HumanoidStateType.Physics] = true,
+    [Enum.HumanoidStateType.FallingDown] = true,
+    [Enum.HumanoidStateType.GettingUp] = true,
+    [Enum.HumanoidStateType.Ragdoll] = true,
+}
+
+task.spawn(function()
+    local events = ReplicatedStorage:WaitForChild("Events", 10)
+    if events then 
+        ragdollEvent = events:WaitForChild("RagdollState", 10) 
+    end
+end)
+
+local function disableBadScripts(char)
+    for _, obj in ipairs(char:GetDescendants()) do
+        if obj:IsA("LocalScript") then
+            local n = obj.Name:lower()
+            if n:find("stun") or n:find("fall") or n:find("ragdoll") then
+                pcall(function() obj.Disabled = true end)
+            end
+        end
+    end
+end
+
+local function startAntiRagdoll()
+    if antiRagdollConn then antiRagdollConn:Disconnect() end
+    antiRagdollAccum = 0
+    antiRagdollConn = RunService.Heartbeat:Connect(function(dt)
+        antiRagdollAccum += dt
+        if antiRagdollAccum < 0.05 then return end
+        antiRagdollAccum = 0
+
+        local char = player.Character
+        if not char then return end
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if not hum or not hum.Parent then return end
+
+        if ragdollEvent then 
+            pcall(function() ragdollEvent:FireServer(false) end) 
+        end
+        
+        hum:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false)
+        hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
+        
+        if BAD_STATES[hum:GetState()] then 
+            hum:ChangeState(Enum.HumanoidStateType.Running) 
+        end
+        
+        if hum.PlatformStand then 
+            hum.PlatformStand = false 
+        end
+    end)
+end
+
+local function stopAntiRagdoll()
+    if antiRagdollConn then
+        antiRagdollConn:Disconnect()
+        antiRagdollConn = nil
+    end
+    local hum = getHumanoid()
+    if hum then
+        hum:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, true)
+        hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true)
+    end
+end
+
+local function onCharacterAntiRagdoll(c)
+    local hum = c:WaitForChild("Humanoid", 5)
+    if hum then
+        hum:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false)
+        hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
+    end
+    disableBadScripts(c)
+end
+
+-- ==================== RAINBOW NAME ====================
+local remotes = ReplicatedStorage:FindFirstChild("Remotes") or ReplicatedStorage
+local setRPNameColor = remotes:FindFirstChild("SetRPNameColor")
+local setRPBioColor = remotes:FindFirstChild("SetRPBioColor") or remotes:FindFirstChild("SetBioColor")
+local setRPRoleColor = remotes:FindFirstChild("SetRPRoleColor") or remotes:FindFirstChild("SetRoleColor")
+
+local function startRainbowName()
+    if rainbowConn then rainbowConn:Disconnect() end
+    rainbowConn = RunService.Heartbeat:Connect(function()
+        if not rainbowActive then return end
+        local wave = (math.cos(tick() * (math.pi * 2 / rainbowSpeed)) + 1) / 2
+        local colorValue = wave * 255
+        local color = Color3.fromRGB(colorValue, colorValue, colorValue)
+        
+        pcall(function()
+            if setRPNameColor then setRPNameColor:FireServer(color) end
+            if setRPBioColor then setRPBioColor:FireServer(color) end
+            if setRPRoleColor then setRPRoleColor:FireServer(color) end
+        end)
+    end)
+end
+
+local function stopRainbowName()
+    if rainbowConn then
+        rainbowConn:Disconnect()
+        rainbowConn = nil
+    end
+end
+
+-- ==================== WINDOW ====================
+local Window = Library:CreateWindow({
+    Title = "6ixx Hub",
+    Footer = "Autoclicker | Head Sit | Hitbox | Avoid | Anti-Ragdoll | Rainbow | Invis",
+    NotifyOnError = true,
+    ShowCustomCursor = true,
+})
+
+local Tabs = {
+    Main = Window:AddTab("Main", "house"),
+    ["UI Settings"] = Window:AddTab("UI Settings", "settings"),
+}
+
+-- ==================== AUTOCLICKER ====================
+local ClickBox = Tabs.Main:AddLeftGroupbox("Autoclicker", "mouse-pointer-click")
+
+ClickBox:AddToggle("AutoClicker", {
+    Text = "Enable Autoclicker",
+    Default = false,
+    Callback = function()
+        clickAccumulator = 0
+    end,
+}):AddKeyPicker("AutoClickKey", {
+    Default = "F4",
+    Mode = "Toggle",
+    SyncToggleState = true,
+    Text = "Autoclicker",
+})
+
+ClickBox:AddSlider("ClickCPS", {
+    Text = "Click Speed",
+    Default = 100,
+    Min = 1,
+    Max = 100,
+    Rounding = 0,
+    Suffix = " CPS",
+})
+
+ClickBox:AddLabel("Autoclicker only works when Roblox is focused", true)
+
+-- ==================== HEAD SIT ====================
+local SitBox = Tabs.Main:AddLeftGroupbox("Head Sit", "user")
+
+SitBox:AddToggle("HeadSit", {
+    Text = "Enable Head Sit",
+    Default = false,
+    Callback = function(v)
+        if not v then
+            local hum = getHumanoid()
+            if hum then hum.Sit = false end
+        end
+    end,
+}):AddKeyPicker("HeadSitKey", {
+    Default = "None",
+    Mode = "Toggle",
+    SyncToggleState = true,
+    Text = "Head Sit",
+})
+
+SitBox:AddInput("SitTarget", {
+    Default = "",
+    Text = "Target Player",
+    Placeholder = "Name or display name...",
+    ClearTextOnFocus = false,
+    Callback = function(value)
+        sitTarget = getPlayer(value)
+        if not sitTarget and value ~= "" then
+            for _, p in ipairs(Players:GetPlayers()) do
+                if p ~= player and (p.Name:lower() == value:lower() or p.DisplayName:lower() == value:lower()) then
+                    sitTarget = p
+                    break
+                end
+            end
+        end
+        if not sitTarget then
+            local hum = getHumanoid()
+            if hum then hum.Sit = false end
+        end
+    end,
+})
+
+SitBox:AddSlider("SitHeight", {
+    Text = "Height Offset",
+    Default = 1.7,
+    Min = 0,
+    Max = 5,
+    Rounding = 1,
+})
+
+SitBox:AddLabel("Avoid list does NOT affect Head Sit", true)
+
+-- ==================== ANTI-RAGDOLL ====================
+local RagdollBox = Tabs.Main:AddLeftGroupbox("Anti-Ragdoll", "shield")
+
+RagdollBox:AddToggle("AntiRagdoll", {
+    Text = "Enable Anti-Ragdoll",
+    Default = false,
+    Callback = function(v)
+        if v then
+            startAntiRagdoll()
+            if player.Character then
+                onCharacterAntiRagdoll(player.Character)
+            end
+            Library:Notify({Title = "Anti-Ragdoll", Description = "Anti-Ragdoll enabled", Time = 2})
+        else
+            stopAntiRagdoll()
+        end
+    end,
+}):AddKeyPicker("AntiRagdollKey", {
+    Default = "None",
+    Mode = "Toggle",
+    SyncToggleState = true,
+    Text = "Anti-Ragdoll",
+})
+
+RagdollBox:AddLabel("Prevents stun, ragdoll, and falling states", true)
+
+-- ==================== INVISIBILITY ====================
+local InvisBox = Tabs.Main:AddLeftGroupbox("Invisibility", "eye-off")
+
+InvisBox:AddToggle("Invisibility", {
+    Text = "Enable Invisibility",
+    Default = false,
+    Callback = function(v)
+        setInvisibility(v)
+        if v then
+            Library:Notify({Title = "Invisibility", Description = "Character shrunk to 0.01 (Anti-cheat safe)", Time = 2})
+        else
+            Library:Notify({Title = "Invisibility", Description = "Character restored", Time = 2})
+        end
+    end,
+}):AddKeyPicker("InvisKey", {
+    Default = "None",
+    Mode = "Toggle",
+    SyncToggleState = true,
+    Text = "Invisibility",
+})
+
+InvisBox:AddLabel("Shrinks character to bypass anticheat", true)
+InvisBox:AddLabel("Others will see you as tiny/dot", true)
+
+-- ==================== RAINBOW NAME ====================
+local RainbowBox = Tabs.Main:AddLeftGroupbox("Rainbow Name", "sparkles")
+
+RainbowBox:AddToggle("RainbowName", {
+    Text = "Enable Rainbow Name",
+    Default = false,
+    Callback = function(v)
+        rainbowActive = v
+        if v then
+            startRainbowName()
+            Library:Notify({Title = "Rainbow Name", Description = "B&W Rainbow mode enabled", Time = 2})
+        else
+            stopRainbowName()
+        end
+    end,
+}):AddKeyPicker("RainbowKey", {
+    Default = "None",
+    Mode = "Toggle",
+    SyncToggleState = true,
+    Text = "Rainbow Name",
+})
+
+RainbowBox:AddSlider("RainbowSpeed", {
+    Text = "Transition Speed",
+    Default = 6,
+    Min = 0.5,
+    Max = 20,
+    Rounding = 1,
+    Callback = function(v)
+        rainbowSpeed = v
+    end,
+})
+
+-- ==================== HITBOX ====================
+local HitboxBox = Tabs.Main:AddRightGroupbox("Player Hitbox", "crosshair")
+
+HitboxBox:AddToggle("HitboxEnabled", {
+    Text = "Enable Hitbox",
+    Default = false,
+    Callback = function(v)
+        if not v then 
+            restoreAllHitboxes()
+            for _, hrp in pairs(hrpCache) do
+                if hrp and hrp.Parent then
+                    hrp.Size = Vector3.new(2, 2, 1)
+                    hrp.Transparency = 1
+                    hrp.Material = Enum.Material.Plastic
+                    hrp.CanCollide = false
+                end
+            end
+        end
+    end,
+}):AddKeyPicker("HitboxKey", {
+    Default = "None",
+    Mode = "Toggle",
+    SyncToggleState = true,
+    Text = "Hitbox",
+})
+
+HitboxBox:AddInput("HitboxTargetName", {
+    Default = "",
+    Text = "Target Name (Optional)",
+    Placeholder = "Specific player only...",
+    ClearTextOnFocus = false,
+    Tooltip = "Leave empty to hitbox ALL non-avoided players",
+})
+
+HitboxBox:AddInput("AvoidTargets", {
+    Default = "",
+    Text = "Avoid Players",
+    Placeholder = "name1, name2, name3...",
+    ClearTextOnFocus = false,
+    Tooltip = "These players get NO hitbox (ignored if in Target Name)",
+    Callback = function(value)
+        avoidNames = {}
+        for word in value:gmatch("[^,]+") do
+            word = word:match("^%s*(.-)%s*$")
+            if word ~= "" then
+                table.insert(avoidNames, word:lower())
+            end
+        end
+        restoreAllHitboxes()
+    end,
+})
+
+HitboxBox:AddSlider("HitboxSize", {
+    Text = "Hitbox Size",
+    Default = 10,
+    Min = 2,
+    Max = 50,
+    Rounding = 0,
+})
+
+HitboxBox:AddSlider("HitboxTransparency", {
+    Text = "Visibility (0=Solid, 1=Hidden)",
+    Default = 0.3,
+    Min = 0,
+    Max = 1,
+    Rounding = 1,
+})
+
+HitboxBox:AddToggle("HitboxVisible", {
+    Text = "Show Hitbox",
+    Default = true,
+})
+
+HitboxBox:AddLabel("Empty Target = Everyone except Avoid", true)
+HitboxBox:AddLabel("Target Name = Only that person", true)
+
+-- ==================== LOOPS ====================
+-- Autoclicker thread
+task.spawn(function()
+    while true do
+        if Toggles.AutoClicker.Value then
+            clickAccumulator += task.wait() * Options.ClickCPS.Value
+            local whole = math.floor(clickAccumulator)
+            clickAccumulator -= whole
+            
+            if mouse1click then
+                for _ = 1, math.min(whole, 10) do
+                    pcall(function()
+                        mouse1click()
+                    end)
+                end
+            end
+        else
+            task.wait(0.1)
+        end
+    end
+end)
+
+-- Heartbeat for movement
+Library:GiveSignal(RunService.Heartbeat:Connect(function(dt)
+    local char = player.Character
+    local root = getRoot()
+    local hum = getHumanoid()
+
+    -- Head Sit (no avoid check)
+    if Toggles.HeadSit.Value and sitTarget then
+        local targetChar = sitTarget.Character
+        if targetChar then
+            local head = targetChar:FindFirstChild("Head")
+            local targetHum = targetChar:FindFirstChildOfClass("Humanoid")
+            
+            if head and root and hum and targetHum then
+                if not hum.Sit then
+                    hum.Sit = true
+                end
+                local targetCFrame = head.CFrame * CFrame.new(0, Options.SitHeight.Value, 0)
+                root.CFrame = targetCFrame
+                if targetHum then
+                    root.Velocity = targetHum.MoveDirection * 16
+                end
+            end
+        else
+            if hum and hum.Sit then
+                hum.Sit = false
+            end
+        end
+    end
+    
+    -- Maintain invisibility if active (for respawns)
+    if invisActive and char then
+        for _, obj in ipairs(char:GetDescendants()) do
+            if obj:IsA("BasePart") and obj.Name ~= "HumanoidRootPart" then
+                if obj.Size.X > 0.1 then -- If not already shrunk
+                    if not invisOriginals[obj] then
+                        invisOriginals[obj] = {Size = obj.Size, Transparency = obj.Transparency}
+                    end
+                    obj.Size = Vector3.new(0.01, 0.01, 0.01)
+                    obj.Transparency = 1
+                end
+            end
+        end
+    end
+end))
+
+-- RenderStepped for hitbox
+Library:GiveSignal(RunService.RenderStepped:Connect(function()
+    local enabled = Toggles.HitboxEnabled.Value
+    local size = Options.HitboxSize.Value
+    local visible = Toggles.HitboxVisible.Value
+    local transparency = Options.HitboxTransparency and Options.HitboxTransparency.Value or 0.3
+
+    -- Cache HRPs
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= player and p.Character then
+            local hrp = p.Character:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                hrpCache[p] = hrp
+            end
+        end
+    end
+
+    -- Apply hitbox
+    for p, hrp in pairs(hrpCache) do
+        if hrp and hrp.Parent then
+            if enabled and isHitboxTarget(p) then
+                if not hitboxOriginals[hrp] then
+                    hitboxOriginals[hrp] = {
+                        Size = hrp.Size,
+                        Transparency = hrp.Transparency,
+                        Material = hrp.Material,
+                        Color = hrp.Color,
+                        CanCollide = hrp.CanCollide,
+                    }
+                end
+                hrp.Size = Vector3.new(size, size, size)
+                hrp.CanCollide = false
+                -- FIXED VISIBILITY: Lower transparency = more visible
+                hrp.Transparency = visible and transparency or 1
+                hrp.Material = visible and Enum.Material.Neon or Enum.Material.Plastic
+                if visible then
+                    hrp.Color = Color3.fromRGB(255, 0, 0) -- Red hitbox
+                end
+            else
+                if hitboxOriginals[hrp] then
+                    restoreHRP(hrp)
+                else
+                    hrp.Size = Vector3.new(2, 2, 1)
+                    hrp.Transparency = 1
+                    hrp.Material = Enum.Material.Plastic
+                    hrp.CanCollide = false
+                end
+            end
+        else
+            hrpCache[p] = nil
+        end
+    end
+end))
+
+-- Events
+Library:GiveSignal(Players.PlayerAdded:Connect(function(p)
+    task.defer(function()
+        if p ~= player and p.Character then
+            local hrp = p.Character:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                hrpCache[p] = hrp
+            end
+        end
+        if Options.SitTarget and Options.SitTarget.Value ~= "" then
+            local newTarget = getPlayer(Options.SitTarget.Value)
+            if newTarget then
+                sitTarget = newTarget
+            end
+        end
+    end)
+end))
+
+Library:GiveSignal(Players.PlayerRemoving:Connect(function(p)
+    if sitTarget == p then 
+        sitTarget = nil 
+    end
+    if hrpCache[p] then
+        if hitboxOriginals[hrpCache[p]] then
+            restoreHRP(hrpCache[p])
+        end
+        hrpCache[p] = nil
+    end
+end))
+
+Library:GiveSignal(player.CharacterAdded:Connect(function(c)
+    task.wait(0.5)
+    if Toggles.AntiRagdoll and Toggles.AntiRagdoll.Value then
+        onCharacterAntiRagdoll(c)
+        startAntiRagdoll()
+    end
+    -- Re-apply invisibility if it was active
+    if invisActive then
+        task.wait(0.5)
+        setInvisibility(true)
+    end
+end))
+
+-- ==================== UI SETTINGS ====================
+local MenuGroup = Tabs["UI Settings"]:AddLeftGroupbox("Menu", "wrench")
+
+MenuGroup:AddToggle("KeybindMenuOpen", {
+    Default = Library.KeybindFrame.Visible,
+    Text = "Open Keybind Menu",
+    Callback = function(value)
+        Library.KeybindFrame.Visible = value
+    end,
+})
+
+MenuGroup:AddToggle("ShowCustomCursor", {
+    Text = "Custom Cursor",
+    Default = true,
+    Callback = function(value)
+        Library.ShowCustomCursor = value
+    end,
+})
+
+MenuGroup:AddDivider()
+MenuGroup:AddLabel("Menu bind"):AddKeyPicker("MenuKeybind", {
+    Default = "RightShift",
+    NoUI = true,
+    Text = "Menu keybind",
+})
+
+MenuGroup:AddButton("Unload", function()
+    Library:Unload()
+end)
+
+Library.ToggleKeybind = Options.MenuKeybind
+
+Library:OnUnload(function()
+    restoreAllHitboxes()
+    for _, hrp in pairs(hrpCache) do
+        if hrp and hrp.Parent then
+            hrp.Size = Vector3.new(2, 2, 1)
+            hrp.Transparency = 1
+            hrp.Material = Enum.Material.Plastic
+        end
+    end
+    setInvisibility(false)
+    local hum = getHumanoid()
+    if hum then hum.Sit = false end
+    stopAntiRagdoll()
+    stopRainbowName()
+    rainbowActive = false
+    invisActive = false
+end)
+
+ThemeManager:SetLibrary(Library)
+SaveManager:SetLibrary(Library)
+SaveManager:IgnoreThemeSettings()
+SaveManager:SetIgnoreIndexes({ "MenuKeybind" })
+ThemeManager:SetFolder("6ixxHub")
+SaveManager:SetFolder("6ixxHub/configs")
+SaveManager:BuildConfigSection(Tabs["UI Settings"])
+ThemeManager:ApplyToTab(Tabs["UI Settings"])
+SaveManager:LoadAutoloadConfig()
+
+Library:Notify({
+    Title = "6ixx Hub",
+    Description = "Hitbox fixed | Invisibility added | Target/Avoid logic updated",
+    Time = 4,
+})
