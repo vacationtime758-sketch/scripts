@@ -1,0 +1,480 @@
+-- 6ixx Hub | Autoclicker + Head Sit + Player Hitbox + Anti-Ragdoll | Obsidian UI
+
+local repo = "https://raw.githubusercontent.com/deividcomsono/Obsidian/main/"
+local Library = loadstring(game:HttpGet(repo .. "Library.lua"))()
+local ThemeManager = loadstring(game:HttpGet(repo .. "addons/ThemeManager.lua"))()
+local SaveManager = loadstring(game:HttpGet(repo .. "addons/SaveManager.lua"))()
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local player = Players.LocalPlayer
+local Options = Library.Options
+local Toggles = Library.Toggles
+
+-- ==================== STATE ====================
+local sitTarget = nil
+local hitboxNames = {}
+local avoidNames = {}
+local clickAccumulator = 0
+local hitboxOriginals = setmetatable({}, { __mode = "k" })
+local antiRagdollConn = nil
+local antiRagdollAccum = 0
+local ragdollEvent = nil
+
+-- ==================== HELPERS ====================
+local function getHumanoid()
+    local char = player.Character
+    return char and char:FindFirstChildOfClass("Humanoid")
+end
+
+-- First player whose name/display name starts with the text
+local function getPlayer(name)
+    if not name or name == "" then return nil end
+    name = name:lower()
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= player
+            and (p.Name:lower():sub(1, #name) == name
+            or p.DisplayName:lower():sub(1, #name) == name) then
+            return p
+        end
+    end
+    return nil
+end
+
+-- Check if player should be avoided
+local function isAvoided(p)
+    if #avoidNames == 0 then return false end
+    local n, d = p.Name:lower(), p.DisplayName:lower()
+    for _, frag in ipairs(avoidNames) do
+        if n:find(frag, 1, true) or d:find(frag, 1, true) then
+            return true
+        end
+    end
+    return false
+end
+
+-- Does this player match any name in the hitbox box?
+local function isHitboxTarget(p)
+    if #hitboxNames == 0 then return false end
+    if isAvoided(p) then return false end
+    local n, d = p.Name:lower(), p.DisplayName:lower()
+    for _, frag in ipairs(hitboxNames) do
+        if n:find(frag, 1, true) or d:find(frag, 1, true) then
+            return true
+        end
+    end
+    return false
+end
+
+local function restoreHRP(hrp)
+    local saved = hitboxOriginals[hrp]
+    if saved and hrp and hrp.Parent then
+        hrp.Size = saved.Size
+        hrp.Transparency = saved.Transparency
+        hrp.Material = saved.Material
+        hrp.Color = saved.Color
+        hrp.CanCollide = saved.CanCollide
+    end
+    hitboxOriginals[hrp] = nil
+end
+
+local function restoreAllHitboxes()
+    for hrp in pairs(hitboxOriginals) do
+        restoreHRP(hrp)
+    end
+end
+
+-- ==================== ANTI-RAGDOLL LOGIC ====================
+local BAD_STATES = {
+    [Enum.HumanoidStateType.Physics]     = true,
+    [Enum.HumanoidStateType.FallingDown] = true,
+    [Enum.HumanoidStateType.GettingUp]   = true,
+    [Enum.HumanoidStateType.Ragdoll]     = true,
+}
+
+task.spawn(function()
+    local events = ReplicatedStorage:WaitForChild("Events", 10)
+    if events then 
+        ragdollEvent = events:WaitForChild("RagdollState", 10) 
+    end
+end)
+
+local function disableBadScripts(char)
+    for _, obj in ipairs(char:GetDescendants()) do
+        if obj:IsA("LocalScript") then
+            local n = obj.Name:lower()
+            if n:find("stun") or n:find("fall") or n:find("ragdoll") then
+                pcall(function() obj.Disabled = true end)
+            end
+        end
+    end
+end
+
+local function startAntiRagdoll()
+    if antiRagdollConn then antiRagdollConn:Disconnect() end
+    antiRagdollAccum = 0
+    antiRagdollConn = RunService.Heartbeat:Connect(function(dt)
+        antiRagdollAccum += dt
+        if antiRagdollAccum < 0.05 then return end
+        antiRagdollAccum = 0
+
+        local char = player.Character
+        if not char then return end
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if not hum or not hum.Parent then return end
+
+        if ragdollEvent then 
+            pcall(function() ragdollEvent:FireServer(false) end) 
+        end
+        
+        hum:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false)
+        hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
+        
+        if BAD_STATES[hum:GetState()] then 
+            hum:ChangeState(Enum.HumanoidStateType.Running) 
+        end
+        
+        if hum.PlatformStand then 
+            hum.PlatformStand = false 
+        end
+    end)
+end
+
+local function stopAntiRagdoll()
+    if antiRagdollConn then
+        antiRagdollConn:Disconnect()
+        antiRagdollConn = nil
+    end
+    local hum = getHumanoid()
+    if hum then
+        hum:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, true)
+        hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true)
+    end
+end
+
+local function onCharacterAntiRagdoll(c)
+    local hum = c:WaitForChild("Humanoid", 5)
+    if hum then
+        hum:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false)
+        hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
+    end
+    disableBadScripts(c)
+end
+
+-- ==================== WINDOW ====================
+local Window = Library:CreateWindow({
+    Title = "6ixx Hub",
+    Footer = "Autoclicker | Head Sit | Hitbox | Avoid Players | Anti-Ragdoll",
+    NotifyOnError = true,
+    ShowCustomCursor = true,
+})
+
+local Tabs = {
+    Main = Window:AddTab("Main", "house"),
+    ["UI Settings"] = Window:AddTab("UI Settings", "settings"),
+}
+
+-- ==================== AUTOCLICKER ====================
+local ClickBox = Tabs.Main:AddLeftGroupbox("Autoclicker", "mouse-pointer-click")
+
+ClickBox:AddToggle("AutoClicker", {
+    Text = "Enable Autoclicker",
+    Default = false,
+    Callback = function()
+        clickAccumulator = 0
+    end,
+}):AddKeyPicker("AutoClickKey", {
+    Default = "F4",
+    Mode = "Toggle",
+    SyncToggleState = true,
+    Text = "Autoclicker",
+})
+
+ClickBox:AddSlider("ClickCPS", {
+    Text = "Click Speed",
+    Default = 100,
+    Min = 1,
+    Max = 100,
+    Rounding = 0,
+    Suffix = " CPS",
+})
+
+ClickBox:AddLabel("Autoclicker only works when Roblox is focused", true)
+
+-- ==================== HEAD SIT ====================
+local SitBox = Tabs.Main:AddLeftGroupbox("Head Sit", "user")
+
+SitBox:AddToggle("HeadSit", {
+    Text = "Enable Head Sit",
+    Default = false,
+    Callback = function(v)
+        if not v then
+            local hum = getHumanoid()
+            if hum then hum.Sit = false end
+        end
+    end,
+})
+
+SitBox:AddInput("SitTarget", {
+    Default = "",
+    Text = "Player",
+    Placeholder = "Name or display name...",
+    ClearTextOnFocus = false,
+    Callback = function(value)
+        sitTarget = getPlayer(value)
+        if not sitTarget then
+            local hum = getHumanoid()
+            if hum then hum.Sit = false end
+        end
+    end,
+})
+
+SitBox:AddSlider("SitHeight", {
+    Text = "Height Offset",
+    Default = 1.7,
+    Min = 0,
+    Max = 5,
+    Rounding = 1,
+})
+
+-- ==================== ANTI-RAGDOLL ====================
+local RagdollBox = Tabs.Main:AddLeftGroupbox("Anti-Ragdoll", "shield")
+
+RagdollBox:AddToggle("AntiRagdoll", {
+    Text = "Enable Anti-Ragdoll",
+    Default = false,
+    Callback = function(v)
+        if v then
+            startAntiRagdoll()
+            if player.Character then
+                onCharacterAntiRagdoll(player.Character)
+            end
+            Library:Notify({Title = "Anti-Ragdoll", Description = "Anti-Ragdoll enabled", Time = 2})
+        else
+            stopAntiRagdoll()
+        end
+    end,
+}):AddKeyPicker("AntiRagdollKey", {
+    Default = "None",
+    Mode = "Toggle",
+    SyncToggleState = true,
+    Text = "Anti-Ragdoll",
+})
+
+RagdollBox:AddLabel("Prevents stun, ragdoll, and falling states", true)
+
+-- ==================== HITBOX ====================
+local HitboxBox = Tabs.Main:AddRightGroupbox("Player Hitbox", "crosshair")
+
+HitboxBox:AddToggle("HitboxEnabled", {
+    Text = "Enable Hitbox",
+    Default = false,
+    Callback = function(v)
+        if not v then restoreAllHitboxes() end
+    end,
+}):AddKeyPicker("HitboxKey", {
+    Default = "None",
+    Mode = "Toggle",
+    SyncToggleState = true,
+    Text = "Hitbox",
+})
+
+HitboxBox:AddInput("HitboxTargets", {
+    Default = "",
+    Text = "Target Players",
+    Placeholder = "name1, name2, name3...",
+    ClearTextOnFocus = false,
+    Tooltip = "Only these players get a bigger hitbox. Separate with COMMAS.",
+    Callback = function(value)
+        hitboxNames = {}
+        for word in value:gmatch("[^,]+") do
+            word = word:match("^%s*(.-)%s*$")
+            if word ~= "" then
+                table.insert(hitboxNames, word:lower())
+            end
+        end
+        restoreAllHitboxes()
+    end,
+})
+
+HitboxBox:AddInput("AvoidTargets", {
+    Default = "",
+    Text = "Avoid Players",
+    Placeholder = "name1, name2, name3...",
+    ClearTextOnFocus = false,
+    Tooltip = "These players will NEVER be targeted. Separate with COMMAS.",
+    Callback = function(value)
+        avoidNames = {}
+        for word in value:gmatch("[^,]+") do
+            word = word:match("^%s*(.-)%s*$")
+            if word ~= "" then
+                table.insert(avoidNames, word:lower())
+            end
+        end
+        restoreAllHitboxes()
+    end,
+})
+
+HitboxBox:AddSlider("HitboxSize", {
+    Text = "Hitbox Size",
+    Default = 10,
+    Min = 2,
+    Max = 50,
+    Rounding = 0,
+})
+
+HitboxBox:AddToggle("HitboxVisible", {
+    Text = "Show Hitbox",
+    Default = false,
+})
+
+HitboxBox:AddLabel("Use commas to separate names: player1, player2", true)
+
+-- ==================== LOOPS ====================
+Library:GiveSignal(RunService.Heartbeat:Connect(function(dt)
+    local char = player.Character
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+
+    -- Autoclicker (Undetectable version)
+    if Toggles.AutoClicker.Value then
+        clickAccumulator += dt * Options.ClickCPS.Value
+        local whole = math.floor(clickAccumulator)
+        clickAccumulator -= whole
+        
+        if mouse1click then
+            for _ = 1, whole do
+                pcall(function()
+                    mouse1click()
+                end)
+            end
+        end
+    end
+
+    -- Head Sit
+    if Toggles.HeadSit.Value and sitTarget then
+        if not isAvoided(sitTarget) then
+            local head = sitTarget.Character and sitTarget.Character:FindFirstChild("Head")
+            if head and root and hum then
+                hum.Sit = true
+                root.CFrame = head.CFrame * CFrame.new(0, Options.SitHeight.Value, 0)
+            end
+        else
+            local hum = getHumanoid()
+            if hum then hum.Sit = false end
+        end
+    end
+end))
+
+-- Hitbox
+Library:GiveSignal(RunService.RenderStepped:Connect(function()
+    local enabled = Toggles.HitboxEnabled.Value
+    local size = Options.HitboxSize.Value
+    local visible = Toggles.HitboxVisible.Value
+
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= player and p.Character then
+            local hrp = p.Character:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                if enabled and isHitboxTarget(p) then
+                    if not hitboxOriginals[hrp] then
+                        hitboxOriginals[hrp] = {
+                            Size = hrp.Size,
+                            Transparency = hrp.Transparency,
+                            Material = hrp.Material,
+                            Color = hrp.Color,
+                            CanCollide = hrp.CanCollide,
+                        }
+                    end
+                    hrp.Size = Vector3.new(size, size, size)
+                    hrp.CanCollide = false
+                    if visible then
+                        hrp.Transparency = 0.7
+                        hrp.Material = Enum.Material.Neon
+                        hrp.Color = Color3.new(1, 1, 1)
+                    else
+                        hrp.Transparency = 1
+                    end
+                elseif hitboxOriginals[hrp] then
+                    restoreHRP(hrp)
+                end
+            end
+        end
+    end
+end))
+
+-- Character events
+Library:GiveSignal(Players.PlayerAdded:Connect(function()
+    task.defer(function()
+        if Options.SitTarget then sitTarget = getPlayer(Options.SitTarget.Value) end
+    end)
+end))
+
+Library:GiveSignal(Players.PlayerRemoving:Connect(function(p)
+    if sitTarget == p then sitTarget = nil end
+end))
+
+Library:GiveSignal(player.CharacterAdded:Connect(function(c)
+    task.wait(0.5)
+    if Toggles.AntiRagdoll and Toggles.AntiRagdoll.Value then
+        onCharacterAntiRagdoll(c)
+        startAntiRagdoll()
+    end
+end))
+
+-- ==================== UI SETTINGS ====================
+local MenuGroup = Tabs["UI Settings"]:AddLeftGroupbox("Menu", "wrench")
+
+MenuGroup:AddToggle("KeybindMenuOpen", {
+    Default = Library.KeybindFrame.Visible,
+    Text = "Open Keybind Menu",
+    Callback = function(value)
+        Library.KeybindFrame.Visible = value
+    end,
+})
+
+MenuGroup:AddToggle("ShowCustomCursor", {
+    Text = "Custom Cursor",
+    Default = true,
+    Callback = function(value)
+        Library.ShowCustomCursor = value
+    end,
+})
+
+MenuGroup:AddDivider()
+MenuGroup:AddLabel("Menu bind"):AddKeyPicker("MenuKeybind", {
+    Default = "RightShift",
+    NoUI = true,
+    Text = "Menu keybind",
+})
+
+MenuGroup:AddButton("Unload", function()
+    Library:Unload()
+end)
+
+Library.ToggleKeybind = Options.MenuKeybind
+
+Library:OnUnload(function()
+    restoreAllHitboxes()
+    local hum = getHumanoid()
+    if hum then hum.Sit = false end
+    stopAntiRagdoll()
+end)
+
+ThemeManager:SetLibrary(Library)
+SaveManager:SetLibrary(Library)
+SaveManager:IgnoreThemeSettings()
+SaveManager:SetIgnoreIndexes({ "MenuKeybind" })
+ThemeManager:SetFolder("6ixxHub")
+SaveManager:SetFolder("6ixxHub/configs")
+SaveManager:BuildConfigSection(Tabs["UI Settings"])
+ThemeManager:ApplyToTab(Tabs["UI Settings"])
+SaveManager:LoadAutoloadConfig()
+
+Library:Notify({
+    Title = "6ixx Hub",
+    Description = "Loaded | F4: Autoclicker | RightShift: Menu | Anti-Ragdoll Added",
+    Time = 4,
+})
