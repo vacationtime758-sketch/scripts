@@ -1,0 +1,349 @@
+--==================================================================
+--  AUTO GRAB
+--  G = toggle spam grab | TP bind = teleport (only when TP mode ON)
+--==================================================================
+
+local Players          = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local ReplicatedStorage= game:GetService("ReplicatedStorage")
+local CoreGui          = game:GetService("CoreGui")
+local LocalPlayer      = Players.LocalPlayer
+
+--===================== CONFIG =====================
+local GRAB_KEYBIND     = Enum.KeyCode.G   -- toggles spam grab (rebindable)
+local TP_KEYBIND       = Enum.KeyCode.T   -- teleport to target, only when TP mode ON (rebindable)
+local TP_MODE_DEFAULT  = false            -- TP mode starts off
+local SPAM_DELAY       = 0.01             -- lower = faster spam
+local TARGETS          = {}               -- {"name1","name2"} empty = nearest player
+--==================================================
+
+-- ---------- remote ----------
+local GrabRF = nil
+task.spawn(function()
+    task.wait(1)
+    pcall(function()
+        GrabRF = ReplicatedStorage.Packages.Knit.Services.CombatService.RF.Grab
+    end)
+end)
+
+local grabTargetIndex = 1
+local teleportEnabled = TP_MODE_DEFAULT
+local spamActive      = false
+local bindingFor      = nil   -- "grab" | "tp" while rebinding
+
+-- ---------- target picker ----------
+local function pickTarget()
+    local myChar = LocalPlayer.Character
+    local myHRP  = myChar and myChar:FindFirstChild("HumanoidRootPart")
+
+    if #TARGETS == 0 then
+        if not myHRP then return nil end
+        local closest, closestDist = nil, math.huge
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p ~= LocalPlayer and p.Character then
+                local hrp = p.Character:FindFirstChild("HumanoidRootPart")
+                local hum = p.Character:FindFirstChildOfClass("Humanoid")
+                if hrp and hum and hum.Health > 0 then
+                    local d = (hrp.Position - myHRP.Position).Magnitude
+                    if d < closestDist then closestDist = d; closest = p end
+                end
+            end
+        end
+        return closest
+    else
+        if grabTargetIndex > #TARGETS then grabTargetIndex = 1 end
+        local search = TARGETS[grabTargetIndex]:lower()
+        grabTargetIndex = grabTargetIndex + 1
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p ~= LocalPlayer and
+               (p.Name:lower():find(search, 1, true) or
+               (p.DisplayName and p.DisplayName:lower():find(search, 1, true))) then
+                return p
+            end
+        end
+        return nil
+    end
+end
+
+-- ---------- teleport to target (only when TP mode is on) ----------
+local function doTeleport()
+    if not teleportEnabled then return end
+    local myChar = LocalPlayer.Character
+    local myHRP  = myChar and myChar:FindFirstChild("HumanoidRootPart")
+    if not myHRP then return end
+
+    local targetPlayer = pickTarget()
+    if not targetPlayer or not targetPlayer.Character then return end
+    local targetHRP = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not targetHRP then return end
+
+    myHRP.CFrame = targetHRP.CFrame
+end
+
+-- ---------- grab (in place, no teleport) ----------
+local function doGrab()
+    local myChar = LocalPlayer.Character
+    local myHRP  = myChar and myChar:FindFirstChild("HumanoidRootPart")
+    if not myHRP then return end
+    if not GrabRF then
+        pcall(function()
+            GrabRF = ReplicatedStorage.Packages.Knit.Services.CombatService.RF.Grab
+        end)
+    end
+    if not GrabRF then return end
+
+    pcall(function() GrabRF:InvokeServer() end)
+end
+
+-- ---------- spam loop ----------
+local function startSpam()
+    task.spawn(function()
+        while spamActive do
+            doGrab()
+            if SPAM_DELAY > 0 then task.wait(SPAM_DELAY) end
+        end
+    end)
+end
+
+--==================================================================
+--  GUI
+--==================================================================
+local gui = Instance.new("ScreenGui")
+gui.Name = "AutoGrabUI"
+gui.ResetOnSpawn = false
+gui.Parent = CoreGui
+
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0, 200, 0, 322)
+frame.Position = UDim2.new(0, 20, 0, 100)
+frame.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+frame.BorderSizePixel = 0
+frame.Active = true
+frame.Parent = gui
+Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 8)
+
+-- drag
+local dragging, dragStart, startPos
+frame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = frame.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then dragging = false end
+        end)
+    end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        local delta = input.Position - dragStart
+        frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+
+local function makeBtn(text, y, h, col)
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(1, -12, 0, h)
+    b.Position = UDim2.new(0, 6, 0, y)
+    b.BackgroundColor3 = Color3.fromRGB(30, 30, 45)
+    b.Text = text
+    b.TextColor3 = col or Color3.fromRGB(220, 220, 220)
+    b.Font = Enum.Font.GothamBold
+    b.TextSize = 13
+    b.Parent = frame
+    Instance.new("UICorner", b).CornerRadius = UDim.new(0, 6)
+    return b
+end
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, -12, 0, 18)
+title.Position = UDim2.new(0, 6, 0, 6)
+title.BackgroundTransparency = 1
+title.Text = "AUTO GRAB"
+title.TextColor3 = Color3.fromRGB(100, 180, 255)
+title.Font = Enum.Font.GothamBold
+title.TextSize = 14
+title.Parent = frame
+
+-- manual grab
+local grabBtn = makeBtn("GRAB", 28, 30, Color3.fromRGB(100, 180, 255))
+grabBtn.MouseButton1Click:Connect(function()
+    doGrab()
+    grabBtn.BackgroundColor3 = Color3.fromRGB(100, 180, 255)
+    task.delay(0.12, function() grabBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 45) end)
+end)
+
+-- bind buttons
+local bindBtn = makeBtn("Grab: " .. GRAB_KEYBIND.Name, 62, 26)
+bindBtn.Size = UDim2.new(0, 91, 0, 26)
+bindBtn.Position = UDim2.new(0, 6, 0, 62)
+
+local tpBindBtn = makeBtn("TP: " .. TP_KEYBIND.Name, 62, 26, Color3.fromRGB(140, 200, 255))
+tpBindBtn.Size = UDim2.new(0, 91, 0, 26)
+tpBindBtn.Position = UDim2.new(0, 103, 0, 62)
+
+-- teleport mode toggle
+local teleportBtn = makeBtn("", 92, 26)
+teleportBtn.Position = UDim2.new(0, 6, 0, 92)
+
+bindBtn.MouseButton1Click:Connect(function()
+    bindingFor = "grab"
+    bindBtn.Text = "Press a key..."
+end)
+tpBindBtn.MouseButton1Click:Connect(function()
+    bindingFor = "tp"
+    tpBindBtn.Text = "Press a key..."
+end)
+
+teleportBtn.MouseButton1Click:Connect(function()
+    teleportEnabled = not teleportEnabled
+    updateStatus()
+end)
+
+-- target input + add
+local input = Instance.new("TextBox")
+input.Size = UDim2.new(0, 130, 0, 26)
+input.Position = UDim2.new(0, 6, 0, 124)
+input.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
+input.Text = ""
+input.PlaceholderText = "player name..."
+input.TextColor3 = Color3.fromRGB(220, 220, 220)
+input.PlaceholderColor3 = Color3.fromRGB(110, 110, 120)
+input.Font = Enum.Font.Gotham
+input.TextSize = 12
+input.ClearTextOnFocus = false
+input.Parent = frame
+Instance.new("UICorner", input).CornerRadius = UDim.new(0, 6)
+
+local addBtn = makeBtn("Add", 124, 26)
+addBtn.Size = UDim2.new(0, 54, 0, 26)
+addBtn.Position = UDim2.new(0, 140, 0, 124)
+
+-- target list
+local list = Instance.new("ScrollingFrame")
+list.Size = UDim2.new(1, -12, 0, 108)
+list.Position = UDim2.new(0, 6, 0, 154)
+list.BackgroundColor3 = Color3.fromRGB(20, 20, 28)
+list.BorderSizePixel = 0
+list.CanvasSize = UDim2.new(0, 0, 0, 0)
+list.ScrollBarThickness = 4
+list.Parent = frame
+Instance.new("UICorner", list).CornerRadius = UDim.new(0, 6)
+
+-- live status readout
+local status = Instance.new("TextLabel")
+status.Size = UDim2.new(1, -12, 0, 30)
+status.Position = UDim2.new(0, 6, 0, 268)
+status.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
+status.Text = "AUTO GRAB: OFF"
+status.TextColor3 = Color3.fromRGB(255, 140, 140)
+status.Font = Enum.Font.GothamBold
+status.TextSize = 15
+status.Parent = frame
+Instance.new("UICorner", status).CornerRadius = UDim.new(0, 6)
+
+-- hint
+local hint = Instance.new("TextLabel")
+hint.Size = UDim2.new(1, -12, 0, 14)
+hint.Position = UDim2.new(0, 6, 0, 302)
+hint.BackgroundTransparency = 1
+hint.Text = "TP bind only works when TP mode is ON"
+hint.TextColor3 = Color3.fromRGB(130, 130, 145)
+hint.Font = Enum.Font.Gotham
+hint.TextSize = 11
+hint.Parent = frame
+
+local function refreshList()
+    for _, c in ipairs(list:GetChildren()) do
+        if c:IsA("TextButton") then c:Destroy() end
+    end
+    for i, name in ipairs(TARGETS) do
+        local b = Instance.new("TextButton")
+        b.Size = UDim2.new(1, -6, 0, 22)
+        b.Position = UDim2.new(0, 3, 0, (i - 1) * 24)
+        b.BackgroundColor3 = Color3.fromRGB(35, 35, 50)
+        b.Text = name .. "   x"
+        b.TextColor3 = Color3.fromRGB(200, 200, 220)
+        b.Font = Enum.Font.Gotham
+        b.TextSize = 12
+        b.Parent = list
+        Instance.new("UICorner", b).CornerRadius = UDim.new(0, 4)
+        b.MouseButton1Click:Connect(function()
+            table.remove(TARGETS, i)
+            refreshList()
+        end)
+    end
+    list.CanvasSize = UDim2.new(0, 0, 0, #TARGETS * 24)
+end
+
+local function addTarget()
+    local txt = input.Text:gsub("%s", "")
+    if txt ~= "" then
+        table.insert(TARGETS, txt)
+        input.Text = ""
+        refreshList()
+    end
+end
+
+addBtn.MouseButton1Click:Connect(addTarget)
+input.FocusLost:Connect(function() addTarget() end)
+
+local function updateStatus()
+    teleportBtn.Text = "TP Mode: " .. (teleportEnabled and "ON" or "OFF")
+    teleportBtn.TextColor3 = teleportEnabled and Color3.fromRGB(120, 255, 150) or Color3.fromRGB(255, 140, 140)
+
+    status.Text = "AUTO GRAB: " .. (spamActive and "ON" or "OFF")
+    status.TextColor3 = spamActive and Color3.fromRGB(120, 255, 150) or Color3.fromRGB(255, 140, 140)
+    status.BackgroundColor3 = spamActive and Color3.fromRGB(25, 45, 30) or Color3.fromRGB(25, 25, 35)
+end
+
+refreshList()
+updateStatus()
+
+--==================================================================
+--  KEYBINDS
+--==================================================================
+-- G -> toggle spam grab (always)
+UserInputService.InputBegan:Connect(function(input, gp)
+    if gp or bindingFor then return end
+    if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+    if input.KeyCode ~= GRAB_KEYBIND then return end
+
+    spamActive = not spamActive
+    updateStatus()
+    if spamActive then startSpam() end
+end)
+
+-- TP bind -> teleport, only when TP mode is ON
+UserInputService.InputBegan:Connect(function(input, gp)
+    if gp or bindingFor then return end
+    if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+    if input.KeyCode == TP_KEYBIND then
+        doTeleport()
+    end
+end)
+
+-- rebind handler
+UserInputService.InputBegan:Connect(function(input, gp)
+    if not bindingFor then return end
+    if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+
+    if input.KeyCode == Enum.KeyCode.Escape then
+        if bindingFor == "grab" then
+            GRAB_KEYBIND = nil
+            bindBtn.Text = "Grab: None"
+        else
+            TP_KEYBIND = nil
+            tpBindBtn.Text = "TP: None"
+        end
+    else
+        if bindingFor == "grab" then
+            GRAB_KEYBIND = input.KeyCode
+            bindBtn.Text = "Grab: " .. input.KeyCode.Name
+        else
+            TP_KEYBIND = input.KeyCode
+            tpBindBtn.Text = "TP: " .. input.KeyCode.Name
+        end
+    end
+    bindingFor = nil
+end)
