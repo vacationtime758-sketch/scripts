@@ -1,0 +1,80 @@
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local player = Players.LocalPlayer
+
+local CurrentKey = Enum.KeyCode.X  -- default, adjustable below
+
+-- GUI
+local gui = Instance.new("ScreenGui")
+gui.Name = "FightingToggleGui"
+gui.ResetOnSpawn = false
+gui.Parent = player:WaitForChild("PlayerGui")
+
+local button = Instance.new("TextButton")
+button.Parent = gui
+button.Position = UDim2.fromScale(0.82, 0.04)
+button.Size = UDim2.new(0, 80, 0, 45)
+button.BackgroundTransparency = 0.4
+button.TextSize = 14
+button.Font = Enum.Font.GothamBold
+button.TextColor3 = Color3.fromRGB(255, 255, 255)
+button.BorderSizePixel = 0
+button.AutoButtonColor = false
+Instance.new("UICorner", button).CornerRadius = UDim.new(0, 8)
+
+-- Bind button
+local bindBtn = Instance.new("TextButton")
+bindBtn.Parent = gui
+bindBtn.Position = UDim2.fromScale(0.82, 0.04)
+bindBtn.Position = UDim2.new(0, 0, 0, 0)
+bindBtn.AnchorPoint = Vector2.new(0, 0)
+bindBtn.Position = UDim2.fromScale(0.82, 0.135)
+bindBtn.Size = UDim2.new(0, 80, 0, 22)
+bindBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+bindBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
+bindBtn.Font = Enum.Font.GothamSemibold
+bindBtn.TextSize = 12
+bindBtn.Text = "Bind: X"
+bindBtn.BorderSizePixel = 0
+Instance.new("UICorner", bindBtn).CornerRadius = UDim.new(0, 6)
+
+local listening = false
+
+local function toggleFighting()
+    local current = player:GetAttribute("Fighting")
+    player:SetAttribute("Fighting", not current)
+end
+
+local function updateButton()
+    if player:GetAttribute("Fighting") then
+        button.Text = "⚔️\nON"
+        button.BackgroundColor3 = Color3.fromRGB(235, 80, 80)
+    else
+        button.Text = "🛡️\nOFF"
+        button.BackgroundColor3 = Color3.fromRGB(80, 120, 235)
+    end
+end
+
+button.MouseButton1Click:Connect(toggleFighting)
+
+bindBtn.MouseButton1Click:Connect(function()
+    listening = not listening
+    bindBtn.Text = listening and "Press any key..." or ("Bind: " .. CurrentKey.Name)
+end)
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+    if listening then
+        listening = false
+        CurrentKey = input.KeyCode
+        bindBtn.Text = "Bind: " .. CurrentKey.Name
+        return
+    end
+    if gameProcessed then return end
+    if input.KeyCode == CurrentKey then
+        toggleFighting()
+    end
+end)
+
+player:GetAttributeChangedSignal("Fighting"):Connect(updateButton)
+updateButton()
