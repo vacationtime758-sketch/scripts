@@ -1,0 +1,1409 @@
+--==================================================================
+--  TUFF  |  strafe + auto-grab + hitbox + ESP
+--  - strafe targets by username OR display name
+--  - click a live player to hard-lock strafe on them (alt-proof)
+--  - ANTI-FLING on grab (no position freeze)
+--  - STABILIZE: kills the strafe<->weld feedback loop on grab
+--  - JUMP SMOOTH: no dip when target jumps/lands
+--  - minimize -> black circle with green "6ix"
+--  - strafe + hitbox + ESP skip the excluded usernames
+--==================================================================
+print("[TUFF] loading")
+
+local Players           = game:GetService("Players")
+local RunService        = game:GetService("RunService")
+local UserInputService  = game:GetService("UserInputService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Lighting          = game:GetService("Lighting")
+local Workspace         = game:GetService("Workspace")
+local lp                = Players.LocalPlayer
+
+--===================== EXCLUDED PLAYERS =====================
+local EXCLUDE = {
+    ["turbotofu6668"] = true,
+    ["batmanranger67"] = true,
+    ["bojackmogmog"]   = true,
+    ["s1ukrq"]         = true,
+    ["dubesgetgenug"]  = true,
+}
+local function isExcluded(plr)
+    if not plr then return false end
+    return EXCLUDE[plr.Name:lower()] == true
+end
+
+--===================== STATE =====================
+local POSES    = {
+    { name = "PRONE",   pitch = -90, roll = 0 },
+    { name = "FACE-UP", pitch = 90,  roll = 0 },
+    { name = "SIT",     pitch = 0,   roll = 0 },
+    { name = "SIDE",    pitch = -90, roll = 90 },
+}
+local YAW_MODES = { "TARGET", "FREE", "SPIN" }
+
+local CFG = {
+    strafeOn = false, height = 2, side = 0, back = 0, spin = 60, strafe = 22,
+    pitch = -90, roll = 0,
+    yawMode = 1, pose = 1,
+    sync = true, hold = false, move = false,
+    antiFling = true, maxGrabSpeed = 35, grabDamp = 0.15,
+    stabOnGrab = true,
+    smoothY = true, smoothUp = 16, smoothDown = 3, smoothDead = 0.06,
+    exactName = nil,
+}
+local STRAFE_TARGETS = {}
+local GRAB_TARGETS   = {}
+
+local saved, frozenCF, freeYaw, spinAcc = nil, nil, 0, 0
+local moveOffset = Vector3.zero
+local grabActive, grabDampUntil = false, 0
+local strafeGrabCF = nil
+local lastGrabTime, lastGrabTarget = 0, nil
+local smoothHeadY, lastTarget = nil, nil
+
+--===================== GRAB REMOTE =====================
+local GrabRF = nil
+task.spawn(function()
+    task.wait(1)
+    pcall(function()
+        GrabRF = ReplicatedStorage.Packages.Knit.Services.CombatService.RF.Grab
+    end)
+end)
+
+--===================== GUI SHELL =====================
+local sg = Instance.new("ScreenGui")
+sg.Name = "TUFF"
+sg.ResetOnSpawn = false
+pcall(function() sg.Parent = (gethui and gethui()) or game:GetService("CoreGui") end)
+if not sg.Parent then sg.Parent = lp:WaitForChild("PlayerGui") end
+
+local W, H = 380, 470
+local main = Instance.new("Frame")
+main.Size = UDim2.new(0, W, 0, H)
+main.Position = UDim2.new(0.5, -W/2, 0.12, 0)
+main.BackgroundColor3 = Color3.fromRGB(9, 9, 11)
+main.BorderSizePixel = 0
+main.Active = true
+main.Parent = sg
+Instance.new("UICorner", main).CornerRadius = UDim.new(0, 12)
+local ms = Instance.new("UIStroke", main)
+ms.Color = Color3.fromRGB(0, 255, 120)
+ms.Transparency = 0.55
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, -60, 0, 34)
+title.Position = UDim2.new(0, 14, 0, 6)
+title.BackgroundTransparency = 1
+title.Font = Enum.Font.GothamBlack
+title.TextSize = 24
+title.TextColor3 = Color3.fromRGB(0, 255, 120)
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.Text = "TUFF"
+title.Parent = main
+
+local minBtn = Instance.new("TextButton")
+minBtn.Size = UDim2.new(0, 30, 0, 30)
+minBtn.Position = UDim2.new(1, -40, 0, 8)
+minBtn.BackgroundColor3 = Color3.fromRGB(20, 20, 24)
+minBtn.Text = "-"
+minBtn.TextColor3 = Color3.fromRGB(0, 255, 120)
+minBtn.Font = Enum.Font.GothamBlack
+minBtn.TextSize = 20
+minBtn.Parent = main
+Instance.new("UICorner", minBtn).CornerRadius = UDim.new(0, 8)
+
+local mini = Instance.new("TextButton")
+mini.Size = UDim2.new(0, 48, 0, 48)
+mini.Position = UDim2.new(0.5, -24, 0.12, 0)
+mini.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+mini.Text = ""
+mini.BorderSizePixel = 0
+mini.Visible = false
+mini.Active = true
+mini.Parent = sg
+Instance.new("UICorner", mini).CornerRadius = UDim.new(1, 0)
+local miniStroke = Instance.new("UIStroke", mini)
+miniStroke.Color = Color3.fromRGB(0, 255, 120)
+miniStroke.Thickness = 2
+
+local miniLabel = Instance.new("TextLabel")
+miniLabel.Size = UDim2.new(1, 0, 1, 0)
+miniLabel.BackgroundTransparency = 1
+miniLabel.Text = "6ix"
+miniLabel.TextColor3 = Color3.fromRGB(0, 255, 120)
+miniLabel.Font = Enum.Font.GothamBlack
+miniLabel.TextSize = 16
+miniLabel.Parent = mini
+
+local dragMoved = {}
+local function makeDraggable(obj)
+    local dragging, dragStart, startPos, moved = false, nil, nil, false
+    dragMoved[obj] = function() return moved end
+    obj.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            dragging, moved = true, false
+            dragStart, startPos = input.Position, obj.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then dragging = false end
+            end)
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+        or input.UserInputType == Enum.UserInputType.Touch) then
+            local d = input.Position - dragStart
+            if math.abs(d.X) > 4 or math.abs(d.Y) > 4 then moved = true end
+            obj.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X,
+                                     startPos.Y.Scale, startPos.Y.Offset + d.Y)
+        end
+    end)
+end
+makeDraggable(main)
+makeDraggable(mini)
+
+minBtn.MouseButton1Click:Connect(function()
+    main.Visible = false
+    mini.Visible = true
+end)
+mini.MouseButton1Click:Connect(function()
+    if dragMoved[mini] and dragMoved[mini]() then return end
+    mini.Visible = false
+    main.Visible = true
+end)
+
+--===================== TABS =====================
+local tabBar = Instance.new("Frame")
+tabBar.Size = UDim2.new(1, -24, 0, 28)
+tabBar.Position = UDim2.new(0, 12, 0, 42)
+tabBar.BackgroundTransparency = 1
+tabBar.Parent = main
+
+local content = Instance.new("Frame")
+content.Size = UDim2.new(1, -24, 1, -132)
+content.Position = UDim2.new(0, 12, 0, 78)
+content.BackgroundTransparency = 1
+content.Parent = main
+
+local tabNames = { "STRAFE", "GRAB", "HITBOX", "ESP" }
+local tabW, tabGap = 84, 6
+local pages, tabBtns = {}, {}
+
+local function newPage()
+    local s = Instance.new("ScrollingFrame")
+    s.Size = UDim2.new(1, 0, 1, 0)
+    s.BackgroundTransparency = 1
+    s.BorderSizePixel = 0
+    s.ScrollBarThickness = 4
+    s.CanvasSize = UDim2.new(0, 0, 0, 300)
+    s.Visible = false
+    s.Parent = content
+    return s
+end
+
+for i, nm in ipairs(tabNames) do
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(0, tabW, 1, 0)
+    b.Position = UDim2.new(0, (i - 1) * (tabW + tabGap), 0, 0)
+    b.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+    b.Text = nm
+    b.TextColor3 = Color3.fromRGB(140, 140, 150)
+    b.Font = Enum.Font.GothamBold
+    b.TextSize = 12
+    b.Parent = tabBar
+    Instance.new("UICorner", b).CornerRadius = UDim.new(0, 8)
+    tabBtns[i] = b
+    pages[i] = newPage()
+end
+
+local function selectTab(i)
+    for k = 1, #tabNames do
+        pages[k].Visible = (k == i)
+        tabBtns[k].TextColor3 = (k == i) and Color3.fromRGB(0, 255, 120) or Color3.fromRGB(140, 140, 150)
+        tabBtns[k].BackgroundColor3 = (k == i) and Color3.fromRGB(24, 32, 26) or Color3.fromRGB(18, 18, 22)
+    end
+end
+for i, b in ipairs(tabBtns) do b.MouseButton1Click:Connect(function() selectTab(i) end) end
+selectTab(1)
+
+--===================== WIDGET HELPERS =====================
+local function mkLabel(parent, y, txt, col, size, x, w, font)
+    local l = Instance.new("TextLabel")
+    l.Size = UDim2.new(0, w or 340, 0, size and size + 4 or 16)
+    l.Position = UDim2.new(0, x or 2, 0, y)
+    l.BackgroundTransparency = 1
+    l.Font = font or Enum.Font.Gotham
+    l.TextSize = size or 11
+    l.TextColor3 = col or Color3.fromRGB(200, 200, 210)
+    l.TextXAlignment = Enum.TextXAlignment.Left
+    l.Text = txt or ""
+    l.Parent = parent
+    return l
+end
+
+local function mkBtn(parent, text, x, y, w, h, cb, bg, fg)
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(0, w, 0, h)
+    b.Position = UDim2.new(0, x, 0, y)
+    b.BackgroundColor3 = bg or Color3.fromRGB(24, 24, 30)
+    b.Text = text
+    b.TextColor3 = fg or Color3.fromRGB(228, 228, 235)
+    b.Font = Enum.Font.GothamBold
+    b.TextSize = 12
+    b.Parent = parent
+    Instance.new("UICorner", b).CornerRadius = UDim.new(0, 8)
+    if cb then b.MouseButton1Click:Connect(cb) end
+    return b
+end
+
+local function valToT(v, mn, mx, exp)
+    if exp then return math.log(v / mn) / math.log(mx / mn) end
+    return (v - mn) / (mx - mn)
+end
+local function tToVal(t, mn, mx, exp)
+    if exp then return mn * (mx / mn) ^ t end
+    return mn + t * (mx - mn)
+end
+
+local function makeSlider(parent, y, labelText, mn, mx, default, exp, onChange, fmt)
+    local holder = Instance.new("Frame")
+    holder.Size = UDim2.new(0, 340, 0, 40)
+    holder.Position = UDim2.new(0, 2, 0, y)
+    holder.BackgroundTransparency = 1
+    holder.Parent = parent
+
+    local lbl = Instance.new("TextLabel")
+    lbl.Size = UDim2.new(1, -80, 0, 14)
+    lbl.BackgroundTransparency = 1
+    lbl.Font = Enum.Font.GothamBold
+    lbl.TextSize = 10
+    lbl.TextColor3 = Color3.fromRGB(205, 205, 215)
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.Text = labelText
+    lbl.Parent = holder
+
+    local val = Instance.new("TextLabel")
+    val.Size = UDim2.new(0, 72, 0, 14)
+    val.Position = UDim2.new(1, -72, 0, 0)
+    val.BackgroundTransparency = 1
+    val.Font = Enum.Font.Code
+    val.TextSize = 10
+    val.TextColor3 = Color3.fromRGB(0, 255, 120)
+    val.TextXAlignment = Enum.TextXAlignment.Right
+    val.Parent = holder
+
+    local track = Instance.new("Frame")
+    track.Size = UDim2.new(1, 0, 0, 6)
+    track.Position = UDim2.new(0, 0, 0, 24)
+    track.BackgroundColor3 = Color3.fromRGB(30, 30, 38)
+    track.BorderSizePixel = 0
+    track.Parent = holder
+    Instance.new("UICorner", track).CornerRadius = UDim.new(1, 0)
+
+    local fill = Instance.new("Frame")
+    fill.Size = UDim2.new(0, 0, 1, 0)
+    fill.BackgroundColor3 = Color3.fromRGB(0, 220, 110)
+    fill.BorderSizePixel = 0
+    fill.Parent = track
+    Instance.new("UICorner", fill).CornerRadius = UDim.new(1, 0)
+
+    local knob = Instance.new("TextButton")
+    knob.Size = UDim2.new(0, 14, 0, 14)
+    knob.AnchorPoint = Vector2.new(0.5, 0.5)
+    knob.Position = UDim2.new(0, 0, 0.5, 0)
+    knob.BackgroundColor3 = Color3.fromRGB(235, 255, 240)
+    knob.Text = ""
+    knob.BorderSizePixel = 0
+    knob.Parent = track
+    Instance.new("UICorner", knob).CornerRadius = UDim.new(1, 0)
+
+    local dragging = false
+    local function apply(v, fire)
+        v = math.clamp(v, mn, mx)
+        local t = valToT(v, mn, mx, exp)
+        fill.Size = UDim2.new(t, 0, 1, 0)
+        knob.Position = UDim2.new(t, 0, 0.5, 0)
+        val.Text = fmt and fmt(v) or string.format("%.2f", v)
+        if fire and onChange then onChange(v) end
+    end
+    local function fromX(x)
+        local a = (x - track.AbsolutePosition.X) / math.max(1, track.AbsoluteSize.X)
+        return tToVal(math.clamp(a, 0, 1), mn, mx, exp)
+    end
+    local function down(i)
+        return i.UserInputType == Enum.UserInputType.MouseButton1
+            or i.UserInputType == Enum.UserInputType.Touch
+    end
+    track.InputBegan:Connect(function(i) if down(i) then dragging = true; apply(fromX(i.Position.X), true) end end)
+    knob.InputBegan:Connect(function(i) if down(i) then dragging = true end end)
+    UserInputService.InputChanged:Connect(function(i)
+        if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement
+        or i.UserInputType == Enum.UserInputType.Touch) then
+            apply(fromX(i.Position.X), true)
+        end
+    end)
+    UserInputService.InputEnded:Connect(function(i) if down(i) then dragging = false end end)
+
+    apply(default, false)
+    return apply
+end
+
+--===================== LOGIC =====================
+local function weldedPlayer()
+    local char = lp.Character
+    if not char then return nil end
+    for _, d in ipairs(char:GetDescendants()) do
+        if d:IsA("Weld") or d:IsA("WeldConstraint") or d:IsA("Motor6D") or d:IsA("Snap") then
+            local a, b = d.Part0, d.Part1
+            if a and b then
+                local other = nil
+                if a:IsDescendantOf(char) and not b:IsDescendantOf(char) then other = b
+                elseif b:IsDescendantOf(char) and not a:IsDescendantOf(char) then other = a end
+                if other then
+                    local model = other:FindFirstAncestorOfClass("Model")
+                    local plr = model and Players:GetPlayerFromCharacter(model)
+                    if plr and plr ~= lp then return plr end
+                end
+            end
+        end
+    end
+    return nil
+end
+
+local function grabbedPlayer()
+    local w = weldedPlayer()
+    if w then return w end
+    local char = lp.Character
+    if os.clock() - lastGrabTime < 0.35 and lastGrabTarget and lastGrabTarget.Character then
+        local myHRP = char and char:FindFirstChild("HumanoidRootPart")
+        local tHRP  = lastGrabTarget.Character:FindFirstChild("HumanoidRootPart")
+        if myHRP and tHRP and (myHRP.Position - tHRP.Position).Magnitude < 12 then
+            return lastGrabTarget
+        end
+    end
+    return nil
+end
+
+local function targetPlayer()
+    if CFG.exactName then
+        local p = Players:FindFirstChild(CFG.exactName)
+        if p and p ~= lp and not isExcluded(p)
+        and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then
+            return p
+        end
+    end
+
+    local root = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
+
+    if #STRAFE_TARGETS > 0 then
+        local best, bd = nil, math.huge
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p ~= lp and not isExcluded(p) and p.Character then
+                local hrp = p.Character:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    local nm = p.Name:lower()
+                    local dn = (p.DisplayName or ""):lower()
+                    local match = false
+                    for _, s in ipairs(STRAFE_TARGETS) do
+                        local q = s:lower()
+                        if nm:find(q, 1, true) or dn:find(q, 1, true) then match = true; break end
+                    end
+                    if match then
+                        if root then
+                            local d = (hrp.Position - root.Position).Magnitude
+                            if d < bd then bd = d; best = p end
+                        else
+                            return p
+                        end
+                    end
+                end
+            end
+        end
+        if best then return best end
+    end
+
+    if not root then return nil end
+    local best, bd = nil, math.huge
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= lp and not isExcluded(p) and p.Character then
+            local hrp = p.Character:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                local d = (hrp.Position - root.Position).Magnitude
+                if d < bd then bd = d; best = p end
+            end
+        end
+    end
+    return best
+end
+
+-- ASYMMETRIC Y FILTER: rises quickly, falls slowly, ignores micro-bob.
+local function filterY(rawY, dt)
+    if not CFG.smoothY then
+        smoothHeadY = rawY
+        return rawY
+    end
+    if smoothHeadY == nil then
+        smoothHeadY = rawY
+        return rawY
+    end
+    local diff = rawY - smoothHeadY
+    if math.abs(diff) <= CFG.smoothDead then
+        return smoothHeadY
+    end
+    local rate = (diff > 0) and CFG.smoothUp or CFG.smoothDown
+    smoothHeadY = smoothHeadY + diff * math.clamp(rate * dt, 0, 1)
+    return smoothHeadY
+end
+
+local function buildCF(dt)
+    local t = targetPlayer()
+    if not t or not t.Character then return nil end
+    local head = t.Character:FindFirstChild("Head") or t.Character:FindFirstChild("HumanoidRootPart")
+    local hrp  = t.Character:FindFirstChild("HumanoidRootPart")
+    if not head or not hrp then return nil end
+
+    if t ~= lastTarget then
+        lastTarget, smoothHeadY = t, nil
+    end
+
+    local yaw
+    if CFG.yawMode == 1 then yaw = math.rad(hrp.Orientation.Y)
+    elseif CFG.yawMode == 2 then yaw = freeYaw
+    else yaw = math.rad(spinAcc) end
+
+    local base = CFrame.Angles(0, yaw, 0)
+    local y = filterY(head.Position.Y, dt or 1/60)
+    local pos = Vector3.new(head.Position.X, y, head.Position.Z)
+        + Vector3.new(0, CFG.height, 0)
+        + base.RightVector * CFG.side
+        + (-base.LookVector) * CFG.back
+        + moveOffset
+
+    return CFrame.new(pos) * base * CFrame.Angles(math.rad(CFG.pitch), 0, math.rad(CFG.roll))
+end
+
+local function strafeEnable()
+    local char = lp.Character
+    local hum  = char and char:FindFirstChildOfClass("Humanoid")
+    local hrp  = char and char:FindFirstChild("HumanoidRootPart")
+    if not hum or not hrp then return false end
+    freeYaw = math.rad(hrp.Orientation.Y)
+    saved = { anchored = hrp.Anchored, platform = hum.PlatformStand, autorotate = hum.AutoRotate }
+    hum.PlatformStand = true
+    hum.AutoRotate = false
+    if not CFG.sync then hrp.Anchored = true end
+    pcall(function() for _, tr in ipairs(hum:GetPlayingAnimationTracks()) do tr:Stop() end end)
+    moveOffset = Vector3.zero
+    frozenCF = nil
+    strafeGrabCF = nil
+    smoothHeadY, lastTarget = nil, nil
+    return true
+end
+
+local function strafeDisable()
+    local char = lp.Character
+    local hum  = char and char:FindFirstChildOfClass("Humanoid")
+    local hrp  = char and char:FindFirstChild("HumanoidRootPart")
+    if saved and hum and hrp then
+        hrp.Anchored      = saved.anchored
+        hum.PlatformStand = saved.platform
+        hum.AutoRotate    = saved.autorotate
+    end
+    saved, frozenCF, strafeGrabCF = nil, nil, nil
+    moveOffset = Vector3.zero
+    smoothHeadY, lastTarget = nil, nil
+end
+
+local function strafeToggle()
+    if CFG.strafeOn then CFG.strafeOn = false; strafeDisable()
+    elseif strafeEnable() then CFG.strafeOn = true end
+end
+
+local function wasdDir()
+    local cam = workspace.CurrentCamera
+    if not cam then return Vector3.zero end
+    local dir = Vector3.zero
+    if UserInputService:IsKeyDown(Enum.KeyCode.W) then dir += cam.CFrame.LookVector end
+    if UserInputService:IsKeyDown(Enum.KeyCode.S) then dir -= cam.CFrame.LookVector end
+    if UserInputService:IsKeyDown(Enum.KeyCode.A) then dir -= cam.CFrame.RightVector end
+    if UserInputService:IsKeyDown(Enum.KeyCode.D) then dir += cam.CFrame.RightVector end
+    if UserInputService:IsKeyDown(Enum.KeyCode.Space) then dir += Vector3.yAxis end
+    if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then dir -= Vector3.yAxis end
+    return dir
+end
+
+--===================== MAIN LOOP =====================
+RunService.RenderStepped:Connect(function(dt)
+    local char = lp.Character
+    local hrp  = char and char:FindFirstChild("HumanoidRootPart")
+    local hum  = char and char:FindFirstChildOfClass("Humanoid")
+    if not hrp then return end
+
+    if CFG.yawMode == 3 then spinAcc += CFG.spin * dt end
+
+    local welded = weldedPlayer()
+
+    if CFG.antiFling then
+        local grabbed = welded or grabbedPlayer()
+        if grabbed then
+            if not grabActive then
+                grabActive = true
+                grabDampUntil = os.clock() + CFG.grabDamp
+            end
+            if os.clock() < grabDampUntil then
+                hrp.AssemblyLinearVelocity  = Vector3.zero
+                hrp.AssemblyAngularVelocity = Vector3.zero
+            else
+                local v = hrp.AssemblyLinearVelocity
+                if v.Magnitude > CFG.maxGrabSpeed then
+                    hrp.AssemblyLinearVelocity = v.Unit * CFG.maxGrabSpeed
+                end
+                hrp.AssemblyAngularVelocity = Vector3.zero
+            end
+        else
+            grabActive = false
+        end
+    else
+        grabActive = false
+    end
+
+    if not CFG.strafeOn then strafeGrabCF = nil; return end
+
+    -- STABILIZE: while welded to the grabbed player, stop re-reading their
+    -- live position (that's what caused the run-away). Hold our own CF.
+    if welded and CFG.stabOnGrab then
+        if not strafeGrabCF then strafeGrabCF = hrp.CFrame end
+        if CFG.move then
+            local dir = wasdDir()
+            if dir.Magnitude > 0.01 then
+                strafeGrabCF = CFrame.new(strafeGrabCF.Position + dir.Unit * CFG.strafe * dt)
+                    * strafeGrabCF.Rotation
+            end
+        end
+        hrp.CFrame = strafeGrabCF
+        if CFG.sync then
+            hrp.AssemblyLinearVelocity  = Vector3.zero
+            hrp.AssemblyAngularVelocity = Vector3.zero
+            if hum then hum.MoveDirection = Vector3.zero end
+        end
+        return
+    end
+    strafeGrabCF = nil
+
+    if CFG.move then
+        local dir = wasdDir()
+        if dir.Magnitude > 0.01 then moveOffset += dir.Unit * CFG.strafe * dt end
+    end
+
+    local cf
+    if CFG.hold and frozenCF then cf = frozenCF
+    else
+        cf = buildCF(dt)
+        if not cf then return end
+        if CFG.hold then frozenCF = cf end
+    end
+
+    hrp.CFrame = cf
+    if CFG.sync then
+        hrp.AssemblyLinearVelocity  = Vector3.zero
+        hrp.AssemblyAngularVelocity = Vector3.zero
+        if hum then hum.MoveDirection = Vector3.zero end
+    end
+end)
+
+lp.CharacterAdded:Connect(function()
+    task.wait(0.5)
+    grabActive = false
+    strafeGrabCF = nil
+    smoothHeadY, lastTarget = nil, nil
+    if CFG.strafeOn then CFG.strafeOn = false; strafeToggle() end
+end)
+
+--===================== STRAFE PAGE =====================
+local pg1 = pages[1]
+pg1.CanvasSize = UDim2.new(0, 0, 0, 830)
+
+local stStatus = mkLabel(pg1, 2, "STRAFE: off", Color3.fromRGB(0, 255, 120), 12, 2, 340, Enum.Font.GothamBold)
+local stHint   = mkLabel(pg1, 20, "", Color3.fromRGB(150, 150, 165), 10, 2, 340, Enum.Font.Code)
+
+local hSlider = makeSlider(pg1, 40,  "HEIGHT (up/down)",      0.1, 50, 2,   true,  function(v) CFG.height = v end)
+local sSlider = makeSlider(pg1, 80,  "LEFT  <-  ->  RIGHT",   -30, 30, 0,   false, function(v) CFG.side = v end)
+local bSlider = makeSlider(pg1, 120, "FRONT <-  ->  BEHIND",  -30, 30, 0,   false, function(v) CFG.back = v end)
+local pSlider = makeSlider(pg1, 160, "PITCH (face down/up)",  -180, 180, -90, false, function(v) CFG.pitch = v end,
+    function(v) return string.format("%d", math.floor(v)) end)
+local rSlider = makeSlider(pg1, 200, "ROLL (lean sideways)",  -180, 180, 0,  false, function(v) CFG.roll = v end,
+    function(v) return string.format("%d", math.floor(v)) end)
+local nSlider = makeSlider(pg1, 240, "SPIN SPEED (deg/s)",    0, 240, 60,  false, function(v) CFG.spin = v end,
+    function(v) return string.format("%d", math.floor(v)) end)
+local vSlider = makeSlider(pg1, 280, "STRAFE SPEED",          0, 60, 22,  false, function(v) CFG.strafe = v end,
+    function(v) return string.format("%d", math.floor(v)) end)
+
+-- JUMP SMOOTH tuning
+local dSlider = makeSlider(pg1, 320, "JUMP SMOOTH - FALL RATE", 0.5, 20, 3, false,
+    function(v) CFG.smoothDown = v end,
+    function(v) return string.format("%.1f", v) end)
+
+mkBtn(pg1, "ON / OFF", 2, 362, 96, 28, function() strafeToggle() end, Color3.fromRGB(20, 40, 28), Color3.fromRGB(0, 255, 120))
+mkBtn(pg1, "YAW",      104, 362, 78, 28, function() CFG.yawMode = CFG.yawMode % #YAW_MODES + 1 end)
+mkBtn(pg1, "FLIP",     188, 362, 78, 28, function() CFG.pitch = -CFG.pitch; pSlider(CFG.pitch, false) end)
+mkBtn(pg1, "POSE",     272, 362, 78, 28, function()
+    CFG.pose = CFG.pose % #POSES + 1
+    local p = POSES[CFG.pose]
+    CFG.pitch, CFG.roll = p.pitch, p.roll
+    pSlider(p.pitch, false); rSlider(p.roll, false)
+end)
+
+mkBtn(pg1, "WASD",  2, 394, 70, 28, function() CFG.move = not CFG.move end)
+mkBtn(pg1, "HOLD",  78, 394, 70, 28, function() CFG.hold = not CFG.hold; frozenCF = nil end)
+mkBtn(pg1, "SMOOTH", 154, 394, 80, 28, function()
+    CFG.smoothY = not CFG.smoothY
+    smoothHeadY = nil
+end, Color3.fromRGB(20, 40, 28), Color3.fromRGB(0, 255, 120))
+mkBtn(pg1, "RESET", 240, 394, 84, 28, function()
+    CFG.strafeOn = false
+    CFG.height, CFG.side, CFG.back = 2, 0, 0
+    moveOffset = Vector3.zero
+    smoothHeadY = nil
+    hSlider(2, false); sSlider(0, false); bSlider(0, false)
+    CFG.pose = 1; CFG.pitch, CFG.roll = -90, 0
+    pSlider(-90, false); rSlider(0, false)
+    strafeDisable()
+end, Color3.fromRGB(45, 24, 24), Color3.fromRGB(255, 170, 170))
+
+local stabBtn = mkBtn(pg1, "", 2, 428, 340, 26, function()
+    CFG.stabOnGrab = not CFG.stabOnGrab
+end, Color3.fromRGB(20, 40, 28), Color3.fromRGB(0, 255, 120))
+
+mkLabel(pg1, 462, "STRAFE TARGETS  (username or display name)", Color3.fromRGB(0, 255, 120), 11, 2, 340, Enum.Font.GothamBold)
+
+local stInput = Instance.new("TextBox")
+stInput.Size = UDim2.new(0, 246, 0, 26)
+stInput.Position = UDim2.new(0, 2, 0, 480)
+stInput.BackgroundColor3 = Color3.fromRGB(22, 22, 28)
+stInput.Text = ""
+stInput.PlaceholderText = "type a name..."
+stInput.TextColor3 = Color3.fromRGB(230, 230, 235)
+stInput.PlaceholderColor3 = Color3.fromRGB(110, 110, 120)
+stInput.Font = Enum.Font.Gotham
+stInput.TextSize = 12
+stInput.ClearTextOnFocus = false
+stInput.Parent = pg1
+Instance.new("UICorner", stInput).CornerRadius = UDim.new(0, 8)
+
+local stList = Instance.new("ScrollingFrame")
+stList.Size = UDim2.new(0, 340, 0, 86)
+stList.Position = UDim2.new(0, 2, 0, 512)
+stList.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
+stList.BorderSizePixel = 0
+stList.CanvasSize = UDim2.new(0, 0, 0, 0)
+stList.ScrollBarThickness = 4
+stList.Parent = pg1
+Instance.new("UICorner", stList).CornerRadius = UDim.new(0, 8)
+
+local function refreshStrafeList()
+    for _, c in ipairs(stList:GetChildren()) do
+        if c:IsA("TextButton") then c:Destroy() end
+    end
+    for i, name in ipairs(STRAFE_TARGETS) do
+        local b = Instance.new("TextButton")
+        b.Size = UDim2.new(1, -6, 0, 22)
+        b.Position = UDim2.new(0, 3, 0, (i - 1) * 24)
+        b.BackgroundColor3 = Color3.fromRGB(28, 34, 30)
+        b.Text = name .. "   x"
+        b.TextColor3 = Color3.fromRGB(210, 230, 215)
+        b.Font = Enum.Font.Gotham
+        b.TextSize = 12
+        b.Parent = stList
+        Instance.new("UICorner", b).CornerRadius = UDim.new(0, 6)
+        b.MouseButton1Click:Connect(function()
+            table.remove(STRAFE_TARGETS, i)
+            refreshStrafeList()
+        end)
+    end
+    stList.CanvasSize = UDim2.new(0, 0, 0, #STRAFE_TARGETS * 24)
+end
+
+local function addStrafeTarget()
+    local txt = stInput.Text:gsub("%s", "")
+    if txt ~= "" then
+        table.insert(STRAFE_TARGETS, txt)
+        stInput.Text = ""
+        refreshStrafeList()
+    end
+end
+mkBtn(pg1, "Add", 254, 480, 88, 26, addStrafeTarget, Color3.fromRGB(20, 40, 28), Color3.fromRGB(0, 255, 120))
+stInput.FocusLost:Connect(addStrafeTarget)
+
+mkLabel(pg1, 606, "LIVE PLAYERS  -  click to hard-lock strafe", Color3.fromRGB(0, 255, 120), 11, 2, 340, Enum.Font.GothamBold)
+local lockLbl = mkLabel(pg1, 624, "LOCK: none", Color3.fromRGB(150, 150, 165), 10, 2, 340, Enum.Font.Code)
+mkBtn(pg1, "CLEAR LOCK", 250, 620, 92, 20, function()
+    CFG.exactName = nil
+end, Color3.fromRGB(40, 24, 24), Color3.fromRGB(255, 170, 170))
+
+local liveList = Instance.new("ScrollingFrame")
+liveList.Size = UDim2.new(0, 340, 0, 150)
+liveList.Position = UDim2.new(0, 2, 0, 646)
+liveList.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
+liveList.BorderSizePixel = 0
+liveList.CanvasSize = UDim2.new(0, 0, 0, 0)
+liveList.ScrollBarThickness = 4
+liveList.Parent = pg1
+Instance.new("UICorner", liveList).CornerRadius = UDim.new(0, 8)
+
+local function refreshLive()
+    for _, c in ipairs(liveList:GetChildren()) do
+        if c:IsA("TextButton") then c:Destroy() end
+    end
+    local i = 0
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= lp then
+            local b = Instance.new("TextButton")
+            b.Size = UDim2.new(1, -6, 0, 24)
+            b.Position = UDim2.new(0, 3, 0, i * 26)
+            local ex = isExcluded(p)
+            b.BackgroundColor3 = (CFG.exactName == p.Name) and Color3.fromRGB(20, 60, 36) or Color3.fromRGB(26, 26, 32)
+            b.Text = string.format("%s  (%s)%s", p.Name, p.DisplayName, ex and "  [skip]" or "")
+            b.TextColor3 = ex and Color3.fromRGB(255, 150, 150) or Color3.fromRGB(215, 235, 220)
+            b.Font = Enum.Font.Gotham
+            b.TextSize = 12
+            b.Parent = liveList
+            Instance.new("UICorner", b).CornerRadius = UDim.new(0, 6)
+            b.MouseButton1Click:Connect(function()
+                if ex then
+                    CFG.exactName = nil
+                else
+                    CFG.exactName = p.Name
+                end
+                refreshLive()
+            end)
+            i += 1
+        end
+    end
+    liveList.CanvasSize = UDim2.new(0, 0, 0, i * 26)
+end
+Players.PlayerAdded:Connect(function() task.wait(0.5); refreshLive() end)
+Players.PlayerRemoving:Connect(function() task.wait(0.2); refreshLive() end)
+
+--===================== GRAB PAGE =====================
+local pg2 = pages[2]
+pg2.CanvasSize = UDim2.new(0, 0, 0, 500)
+
+local GRAB_KEYBIND = Enum.KeyCode.G
+local TP_KEYBIND   = Enum.KeyCode.T
+local TP_MODE      = false
+local SPAM_DELAY   = 0.01
+local spamActive   = false
+local bindingFor   = nil
+local refreshGrabUI  -- forward declared, defined below
+
+local gStatus = mkLabel(pg2, 2, "AUTO GRAB: OFF", Color3.fromRGB(255, 150, 150), 12, 2, 340, Enum.Font.GothamBold)
+local gHint   = mkLabel(pg2, 20, "G = toggle spam grab | T = teleport (TP mode ON only)", Color3.fromRGB(150, 150, 165), 10, 2, 340, Enum.Font.Code)
+
+local function pickGrabTarget()
+    local myChar = lp.Character
+    local myHRP  = myChar and myChar:FindFirstChild("HumanoidRootPart")
+    if #GRAB_TARGETS == 0 then
+        if not myHRP then return nil end
+        local closest, cd = nil, math.huge
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p ~= lp and p.Character then
+                local hrp = p.Character:FindFirstChild("HumanoidRootPart")
+                local hum = p.Character:FindFirstChildOfClass("Humanoid")
+                if hrp and hum and hum.Health > 0 then
+                    local d = (hrp.Position - myHRP.Position).Magnitude
+                    if d < cd then cd = d; closest = p end
+                end
+            end
+        end
+        return closest
+    end
+    local search = GRAB_TARGETS[1]:lower()
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= lp and (p.Name:lower():find(search, 1, true)
+        or (p.DisplayName and p.DisplayName:lower():find(search, 1, true))) then
+            return p
+        end
+    end
+    return nil
+end
+
+local function doGrab()
+    local myHRP = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
+    if not myHRP then return end
+    if not GrabRF then
+        pcall(function() GrabRF = ReplicatedStorage.Packages.Knit.Services.CombatService.RF.Grab end)
+    end
+    if not GrabRF then return end
+    lastGrabTarget = pickGrabTarget()
+    lastGrabTime = os.clock()
+    pcall(function() GrabRF:InvokeServer() end)
+end
+
+local function doTeleport()
+    if not TP_MODE then return end
+    local myHRP = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
+    if not myHRP then return end
+    local t = pickGrabTarget()
+    if not t or not t.Character then return end
+    local tHRP = t.Character:FindFirstChild("HumanoidRootPart")
+    if tHRP then myHRP.CFrame = tHRP.CFrame end
+end
+
+local function startSpam()
+    task.spawn(function()
+        while spamActive do
+            doGrab()
+            if SPAM_DELAY > 0 then task.wait(SPAM_DELAY) end
+        end
+    end)
+end
+
+local function setSpam(state)
+    spamActive = state
+    if spamActive then startSpam() end
+    if refreshGrabUI then refreshGrabUI() end
+end
+
+-- ONE handler used by BOTH the button and the bind, with a debounce so a
+-- single click can't fire twice through overlapping input signals.
+local lastToggleAt = 0
+local function toggleSpamGrab()
+    local now = os.clock()
+    if now - lastToggleAt < 0.15 then return end
+    lastToggleAt = now
+    setSpam(not spamActive)
+end
+
+local grabBtn = mkBtn(pg2, "SPAM GRAB: OFF", 2, 42, 340, 30, nil,
+    Color3.fromRGB(20, 40, 28), Color3.fromRGB(255, 150, 150))
+grabBtn.AutoButtonColor = true
+grabBtn.Active = true
+
+grabBtn.MouseButton1Click:Connect(toggleSpamGrab)
+grabBtn.TouchTap:Connect(toggleSpamGrab)
+grabBtn.Activated:Connect(toggleSpamGrab)
+
+local grabBindBtn = mkBtn(pg2, "Grab: " .. GRAB_KEYBIND.Name, 2, 78, 166, 26, function()
+    bindingFor = "grab"; grabBindBtn.Text = "Press a key..."
+end)
+local tpBindBtn = mkBtn(pg2, "TP: " .. TP_KEYBIND.Name, 176, 78, 166, 26, function()
+    bindingFor = "tp"; tpBindBtn.Text = "Press a key..."
+end)
+
+local tpBtn = mkBtn(pg2, "", 2, 110, 340, 26, function()
+    TP_MODE = not TP_MODE
+    refreshGrabUI()
+end)
+
+local afBtn = mkBtn(pg2, "", 2, 142, 340, 26, function()
+    CFG.antiFling = not CFG.antiFling
+    refreshGrabUI()
+end, Color3.fromRGB(20, 40, 28), Color3.fromRGB(0, 255, 120))
+
+local afSlider = makeSlider(pg2, 176, "MAX GRAB SPEED (anti-fling cap)", 5, 120, 35, false,
+    function(v) CFG.maxGrabSpeed = v end,
+    function(v) return string.format("%d", math.floor(v)) end)
+
+function refreshGrabUI()
+    tpBtn.Text = "TP Mode: " .. (TP_MODE and "ON" or "OFF")
+    tpBtn.TextColor3 = TP_MODE and Color3.fromRGB(0, 255, 120) or Color3.fromRGB(255, 150, 150)
+    afBtn.Text = "ANTI-FLING ON GRAB: " .. (CFG.antiFling and "ON" or "OFF")
+    afBtn.TextColor3 = CFG.antiFling and Color3.fromRGB(0, 255, 120) or Color3.fromRGB(200, 200, 210)
+    gStatus.Text = "AUTO GRAB: " .. (spamActive and "ON" or "OFF")
+    gStatus.TextColor3 = spamActive and Color3.fromRGB(0, 255, 120) or Color3.fromRGB(255, 150, 150)
+    grabBtn.Text = "SPAM GRAB: " .. (spamActive and "ON" or "OFF")
+    grabBtn.TextColor3 = spamActive and Color3.fromRGB(0, 255, 120) or Color3.fromRGB(255, 150, 150)
+    grabBtn.BackgroundColor3 = spamActive and Color3.fromRGB(24, 60, 36) or Color3.fromRGB(20, 40, 28)
+end
+
+mkLabel(pg2, 222, "GRAB TARGETS (optional - empty = nearest)", Color3.fromRGB(0, 255, 120), 11, 2, 340, Enum.Font.GothamBold)
+
+local gInput = Instance.new("TextBox")
+gInput.Size = UDim2.new(0, 246, 0, 26)
+gInput.Position = UDim2.new(0, 2, 0, 240)
+gInput.BackgroundColor3 = Color3.fromRGB(22, 22, 28)
+gInput.PlaceholderText = "player name..."
+gInput.TextColor3 = Color3.fromRGB(230, 230, 235)
+gInput.PlaceholderColor3 = Color3.fromRGB(110, 110, 120)
+gInput.Font = Enum.Font.Gotham
+gInput.TextSize = 12
+gInput.ClearTextOnFocus = false
+gInput.Parent = pg2
+Instance.new("UICorner", gInput).CornerRadius = UDim.new(0, 8)
+
+local gList = Instance.new("ScrollingFrame")
+gList.Size = UDim2.new(0, 340, 0, 130)
+gList.Position = UDim2.new(0, 2, 0, 272)
+gList.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
+gList.BorderSizePixel = 0
+gList.CanvasSize = UDim2.new(0, 0, 0, 0)
+gList.ScrollBarThickness = 4
+gList.Parent = pg2
+Instance.new("UICorner", gList).CornerRadius = UDim.new(0, 8)
+
+local function refreshGrabList()
+    for _, c in ipairs(gList:GetChildren()) do
+        if c:IsA("TextButton") then c:Destroy() end
+    end
+    for i, name in ipairs(GRAB_TARGETS) do
+        local b = Instance.new("TextButton")
+        b.Size = UDim2.new(1, -6, 0, 22)
+        b.Position = UDim2.new(0, 3, 0, (i - 1) * 24)
+        b.BackgroundColor3 = Color3.fromRGB(28, 34, 30)
+        b.Text = name .. "   x"
+        b.TextColor3 = Color3.fromRGB(210, 230, 215)
+        b.Font = Enum.Font.Gotham
+        b.TextSize = 12
+        b.Parent = gList
+        Instance.new("UICorner", b).CornerRadius = UDim.new(0, 6)
+        b.MouseButton1Click:Connect(function()
+            table.remove(GRAB_TARGETS, i)
+            refreshGrabList()
+        end)
+    end
+    gList.CanvasSize = UDim2.new(0, 0, 0, #GRAB_TARGETS * 24)
+end
+
+local function addGrabTarget()
+    local txt = gInput.Text:gsub("%s", "")
+    if txt ~= "" then
+        table.insert(GRAB_TARGETS, txt)
+        gInput.Text = ""
+        refreshGrabList()
+    end
+end
+mkBtn(pg2, "Add", 254, 240, 88, 26, addGrabTarget, Color3.fromRGB(20, 40, 28), Color3.fromRGB(0, 255, 120))
+gInput.FocusLost:Connect(addGrabTarget)
+
+mkLabel(pg2, 410, "Anti-fling zeroes velocity for a split second when a grab\nconnects, then just caps speed. No position freeze.",
+    Color3.fromRGB(150, 150, 165), 10, 2, 340)
+
+refreshGrabList()
+refreshGrabUI()
+
+--===================== HITBOX PAGE =====================
+local pg3 = pages[3]
+pg3.CanvasSize = UDim2.new(0, 0, 0, 380)
+
+local HitboxEnabled, HitboxVisible, InvisibilityEnabled = false, false, false
+local FakeChar, HitboxSize, HitboxTransparency, HitboxTargetName = nil, 10, 0.9, ""
+local hrpCache = {}
+
+local hStatus = mkLabel(pg3, 2, "Hitbox: OFF", Color3.fromRGB(255, 150, 150), 12, 2, 340, Enum.Font.GothamBold)
+local hvStatus = mkLabel(pg3, 20, "Hitbox Visibility: OFF", Color3.fromRGB(255, 150, 150), 12, 2, 340, Enum.Font.GothamBold)
+local iStatus  = mkLabel(pg3, 38, "Invisibility: OFF", Color3.fromRGB(255, 150, 150), 12, 2, 340, Enum.Font.GothamBold)
+
+local function updateHitbox(player, hrp)
+    if not hrp then return end
+    local should = HitboxEnabled
+    if HitboxTargetName ~= "" then
+        should = should and player.Name:lower():find(HitboxTargetName)
+    end
+    if isExcluded(player) then should = false end
+    if not should then
+        hrp.Size = Vector3.new(2, 2, 1)
+        hrp.Transparency = 1
+        hrp.Material = Enum.Material.Plastic
+        hrp.CanCollide = false
+        return
+    end
+    hrp.Size = Vector3.new(HitboxSize, HitboxSize, HitboxSize)
+    hrp.Transparency = HitboxVisible and HitboxTransparency or 1
+    hrp.Material = HitboxVisible and Enum.Material.Neon or Enum.Material.Plastic
+    hrp.CanCollide = false
+end
+
+local function updateAllHitboxes()
+    for player, hrp in pairs(hrpCache) do
+        if player.Parent and hrp.Parent then updateHitbox(player, hrp) end
+    end
+end
+
+local function cachePlayerHRP(player)
+    local char = player.Character
+    if char then
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if hrp then hrpCache[player] = hrp; updateHitbox(player, hrp) end
+    end
+    player.CharacterAdded:Connect(function(c)
+        local hrp = c:WaitForChild("HumanoidRootPart")
+        hrpCache[player] = hrp
+        updateHitbox(player, hrp)
+    end)
+end
+for _, p in ipairs(Players:GetPlayers()) do if p ~= lp then cachePlayerHRP(p) end end
+Players.PlayerAdded:Connect(function(p) if p ~= lp then cachePlayerHRP(p) end end)
+Players.PlayerRemoving:Connect(function(p) hrpCache[p] = nil end)
+
+local function enableInvisibility()
+    local character = lp.Character
+    if not character then return end
+    local root = character:FindFirstChild("HumanoidRootPart")
+    if root then
+        FakeChar = root:Clone()
+        FakeChar.Parent = Workspace
+        FakeChar.Anchored = false
+        FakeChar.CanCollide = false
+    end
+    character.Parent = Lighting
+    InvisibilityEnabled = true
+end
+local function disableInvisibility()
+    if FakeChar then FakeChar:Destroy(); FakeChar = nil end
+    if lp.Character then lp.Character.Parent = Workspace end
+    InvisibilityEnabled = false
+end
+
+mkBtn(pg3, "TOGGLE HITBOX", 2, 62, 340, 28, function()
+    HitboxEnabled = not HitboxEnabled
+    hStatus.Text = "Hitbox: " .. (HitboxEnabled and "ON" or "OFF")
+    hStatus.TextColor3 = HitboxEnabled and Color3.fromRGB(0, 255, 120) or Color3.fromRGB(255, 150, 150)
+    updateAllHitboxes()
+end, Color3.fromRGB(20, 40, 28), Color3.fromRGB(0, 255, 120))
+
+mkBtn(pg3, "TOGGLE HITBOX VISIBILITY", 2, 96, 340, 28, function()
+    HitboxVisible = not HitboxVisible
+    hvStatus.Text = "Hitbox Visibility: " .. (HitboxVisible and "ON" or "OFF")
+    hvStatus.TextColor3 = HitboxVisible and Color3.fromRGB(0, 255, 120) or Color3.fromRGB(255, 150, 150)
+    updateAllHitboxes()
+end)
+
+mkBtn(pg3, "TOGGLE INVISIBILITY", 2, 130, 340, 28, function()
+    if InvisibilityEnabled then
+        disableInvisibility()
+        iStatus.Text = "Invisibility: OFF"
+        iStatus.TextColor3 = Color3.fromRGB(255, 150, 150)
+    else
+        enableInvisibility()
+        iStatus.Text = "Invisibility: ON"
+        iStatus.TextColor3 = Color3.fromRGB(0, 255, 120)
+    end
+end)
+
+mkLabel(pg3, 168, "HITBOX SIZE", Color3.fromRGB(200, 200, 210), 11, 2, 160, Enum.Font.GothamBold)
+local sizeBox = Instance.new("TextBox")
+sizeBox.Size = UDim2.new(0, 80, 0, 26)
+sizeBox.Position = UDim2.new(0, 262, 0, 164)
+sizeBox.BackgroundColor3 = Color3.fromRGB(22, 22, 28)
+sizeBox.Text = tostring(HitboxSize)
+sizeBox.TextColor3 = Color3.fromRGB(0, 255, 120)
+sizeBox.Font = Enum.Font.Code
+sizeBox.TextSize = 14
+sizeBox.ClearTextOnFocus = false
+sizeBox.Parent = pg3
+Instance.new("UICorner", sizeBox).CornerRadius = UDim.new(0, 8)
+sizeBox.FocusLost:Connect(function()
+    local n = tonumber(sizeBox.Text)
+    if n and n > 0 then HitboxSize = n; updateAllHitboxes()
+    else sizeBox.Text = tostring(HitboxSize) end
+end)
+
+mkLabel(pg3, 202, "HITBOX TARGET (name filter)", Color3.fromRGB(200, 200, 210), 11, 2, 200, Enum.Font.GothamBold)
+local hTargetBox = Instance.new("TextBox")
+hTargetBox.Size = UDim2.new(0, 180, 0, 26)
+hTargetBox.Position = UDim2.new(0, 162, 0, 198)
+hTargetBox.BackgroundColor3 = Color3.fromRGB(22, 22, 28)
+hTargetBox.PlaceholderText = "all"
+hTargetBox.Text = ""
+hTargetBox.TextColor3 = Color3.fromRGB(230, 230, 235)
+hTargetBox.PlaceholderColor3 = Color3.fromRGB(110, 110, 120)
+hTargetBox.Font = Enum.Font.Gotham
+hTargetBox.TextSize = 12
+hTargetBox.ClearTextOnFocus = false
+hTargetBox.Parent = pg3
+Instance.new("UICorner", hTargetBox).CornerRadius = UDim.new(0, 8)
+hTargetBox:GetPropertyChangedSignal("Text"):Connect(function()
+    HitboxTargetName = hTargetBox.Text:lower()
+    updateAllHitboxes()
+end)
+
+mkLabel(pg3, 236, "Excluded (auto-skipped): turbotofu6668, Batmanranger67,\nBojackmogmog, s1ukrq, dubesgetgenug",
+    Color3.fromRGB(255, 150, 150), 10, 2, 340)
+
+mkBtn(pg3, "UNLOAD", 2, 288, 340, 28, function()
+    if InvisibilityEnabled then disableInvisibility() end
+    pcall(function() sg:Destroy() end)
+end, Color3.fromRGB(45, 24, 24), Color3.fromRGB(255, 170, 170))
+
+--===================== ESP =====================
+local pg4 = pages[4]
+pg4.CanvasSize = UDim2.new(0, 0, 0, 360)
+
+local ESP = {
+    enabled = false, box = true, chams = false,
+    name = true, dist = true, health = true,
+    teamCheck = false, showExcluded = true,
+    maxDist = 500,
+    color = Color3.fromRGB(0, 255, 120),
+}
+local ESP_KEYBIND = Enum.KeyCode.F4
+
+local espFolder = Instance.new("Folder")
+espFolder.Name = "TUFF_ESP"
+espFolder.Parent = Workspace
+
+local espObjects = {}
+
+local function applyESPStyle(obj)
+    obj.highlight.FillColor = ESP.color
+    obj.highlight.OutlineColor = ESP.color
+    obj.box.Color3 = ESP.color
+    obj.dist.TextColor3 = ESP.color
+    obj.name.TextColor3 = ESP.color
+    obj.billboard.MaxDistance = ESP.maxDist
+end
+
+local function createESP(player)
+    if player == lp or espObjects[player] then return end
+    local obj = {}
+
+    local hl = Instance.new("Highlight")
+    hl.Name = "hl"
+    hl.FillTransparency = 0.65
+    hl.OutlineTransparency = 0
+    hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+    hl.Parent = espFolder
+    obj.highlight = hl
+
+    local box = Instance.new("SelectionBox")
+    box.Name = "box"
+    box.LineThickness = 0.04
+    box.SurfaceTransparency = 1
+    box.Parent = espFolder
+    obj.box = box
+
+    local bb = Instance.new("BillboardGui")
+    bb.Name = "bb"
+    bb.Size = UDim2.new(0, 130, 0, 44)
+    bb.StudsOffsetWorldSpace = Vector3.new(0, 3.3, 0)
+    bb.AlwaysOnTop = true
+    bb.Parent = espFolder
+    obj.billboard = bb
+
+    local nameL = Instance.new("TextLabel")
+    nameL.Size = UDim2.new(1, 0, 0, 15)
+    nameL.BackgroundTransparency = 1
+    nameL.Font = Enum.Font.GothamBold
+    nameL.TextSize = 13
+    nameL.TextStrokeTransparency = 0.3
+    nameL.Text = player.Name
+    nameL.Parent = bb
+    obj.name = nameL
+
+    local hpBg = Instance.new("Frame")
+    hpBg.Size = UDim2.new(1, -24, 0, 5)
+    hpBg.Position = UDim2.new(0, 12, 0, 17)
+    hpBg.BackgroundColor3 = Color3.fromRGB(18, 18, 20)
+    hpBg.BorderSizePixel = 0
+    hpBg.Parent = bb
+    Instance.new("UICorner", hpBg).CornerRadius = UDim.new(1, 0)
+
+    local hpFill = Instance.new("Frame")
+    hpFill.Size = UDim2.new(1, 0, 1, 0)
+    hpFill.BackgroundColor3 = Color3.fromRGB(0, 255, 120)
+    hpFill.BorderSizePixel = 0
+    hpFill.Parent = hpBg
+    Instance.new("UICorner", hpFill).CornerRadius = UDim.new(1, 0)
+    obj.hpBg, obj.hpFill = hpBg, hpFill
+
+    local distL = Instance.new("TextLabel")
+    distL.Size = UDim2.new(1, 0, 0, 14)
+    distL.Position = UDim2.new(0, 0, 0, 25)
+    distL.BackgroundTransparency = 1
+    distL.Font = Enum.Font.Code
+    distL.TextSize = 11
+    distL.TextStrokeTransparency = 0.5
+    distL.Text = ""
+    distL.Parent = bb
+    obj.dist = distL
+
+    espObjects[player] = obj
+    applyESPStyle(obj)
+end
+
+local function destroyESP(player)
+    local o = espObjects[player]
+    if not o then return end
+    for _, v in pairs(o) do
+        if typeof(v) == "Instance" then v:Destroy() end
+    end
+    espObjects[player] = nil
+end
+
+local function updateESP()
+    local myRoot = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
+    for player, obj in pairs(espObjects) do
+        local char = player.Character
+        local hrp  = char and char:FindFirstChild("HumanoidRootPart")
+        local head = char and char:FindFirstChild("Head")
+        local hum  = char and char:FindFirstChildOfClass("Humanoid")
+
+        local valid = ESP.enabled and hrp ~= nil and hum ~= nil and hum.Health > 0
+        if valid and not ESP.showExcluded and isExcluded(player) then valid = false end
+        if valid and ESP.teamCheck and player.Team ~= nil and player.Team == lp.Team then valid = false end
+
+        local d = 0
+        if valid and myRoot and hrp then
+            d = (hrp.Position - myRoot.Position).Magnitude
+            if ESP.maxDist > 0 and d > ESP.maxDist then valid = false end
+        end
+
+        obj.highlight.Adornee = valid and char or nil
+        obj.box.Adornee = valid and char or nil
+        obj.billboard.Adornee = valid and head or nil
+
+        if valid then
+            obj.highlight.Enabled = ESP.chams
+            obj.box.Visible = ESP.box
+            obj.billboard.Enabled = ESP.name or ESP.dist or ESP.health
+            obj.name.Visible = ESP.name
+            obj.hpBg.Visible = ESP.health
+            obj.dist.Visible = ESP.dist
+            obj.name.Text = player.Name
+            obj.billboard.MaxDistance = ESP.maxDist
+            if ESP.health and hum then
+                obj.hpFill.Size = UDim2.new(math.clamp(hum.Health / math.max(hum.MaxHealth, 1), 0, 1), 0, 1, 0)
+            end
+            if ESP.dist then
+                obj.dist.Text = string.format("%d studs", math.floor(d))
+            end
+        else
+            obj.highlight.Enabled = false
+            obj.box.Visible = false
+            obj.billboard.Enabled = false
+        end
+    end
+end
+
+local function refreshESPAll()
+    for _, o in pairs(espObjects) do applyESPStyle(o) end
+end
+
+for _, p in ipairs(Players:GetPlayers()) do if p ~= lp then createESP(p) end end
+Players.PlayerAdded:Connect(function(p) task.wait(0.3); createESP(p) end)
+Players.PlayerRemoving:Connect(function(p) destroyESP(p) end)
+
+RunService.RenderStepped:Connect(updateESP)
+
+local eStatus = mkLabel(pg4, 2, "ESP: OFF", Color3.fromRGB(255, 150, 150), 12, 2, 340, Enum.Font.GothamBold)
+local eHint   = mkLabel(pg4, 20, "", Color3.fromRGB(150, 150, 165), 10, 2, 340, Enum.Font.Code)
+
+local eBtn = mkBtn(pg4, "", 2, 44, 340, 28, function()
+    ESP.enabled = not ESP.enabled
+end, Color3.fromRGB(20, 40, 28), Color3.fromRGB(0, 255, 120))
+
+local boxBtn  = mkBtn(pg4, "", 2, 78, 166, 26, function() ESP.box = not ESP.box end)
+local chamsBtn= mkBtn(pg4, "", 176, 78, 166, 26, function() ESP.chams = not ESP.chams end)
+local nameBtn = mkBtn(pg4, "", 2, 108, 166, 26, function() ESP.name = not ESP.name end)
+local distBtn = mkBtn(pg4, "", 176, 108, 166, 26, function() ESP.dist = not ESP.dist end)
+local hpBtn   = mkBtn(pg4, "", 2, 138, 166, 26, function() ESP.health = not ESP.health end)
+local teamBtn = mkBtn(pg4, "", 176, 138, 166, 26, function() ESP.teamCheck = not ESP.teamCheck end)
+local exBtn   = mkBtn(pg4, "", 2, 168, 166, 26, function() ESP.showExcluded = not ESP.showExcluded end)
+local eBindBtn= mkBtn(pg4, "Key: " .. ESP_KEYBIND.Name, 176, 168, 166, 26, function()
+    bindingFor = "esp"; eBindBtn.Text = "Press a key..."
+end)
+
+mkLabel(pg4, 200, "COLOR", Color3.fromRGB(0, 255, 120), 11, 2, 340, Enum.Font.GothamBold)
+
+local COLORS = {
+    { "GREEN",  Color3.fromRGB(0, 255, 120) },
+    { "RED",    Color3.fromRGB(255, 70, 70) },
+    { "CYAN",   Color3.fromRGB(0, 220, 255) },
+    { "WHITE",  Color3.fromRGB(255, 255, 255) },
+    { "PURPLE", Color3.fromRGB(180, 100, 255) },
+    { "YELLOW", Color3.fromRGB(255, 220, 60) },
+}
+for i, c in ipairs(COLORS) do
+    mkBtn(pg4, c[1], (i - 1) * 58, 216, 54, 22, function()
+        ESP.color = c[2]
+        refreshESPAll()
+    end, c[2], Color3.fromRGB(10, 10, 10))
+end
+
+local espDistSlider = makeSlider(pg4, 246, "ESP MAX DISTANCE", 20, 2000, 500, false,
+    function(v) ESP.maxDist = v end,
+    function(v) return string.format("%d", math.floor(v)) end)
+
+mkLabel(pg4, 292, "ESP skips excluded usernames unless SHOW EXCLUDED is on.\nF4 toggles ESP.", Color3.fromRGB(150, 150, 165), 10, 2, 340)
+
+local function refreshESPUI()
+    eStatus.Text = "ESP: " .. (ESP.enabled and "ON" or "OFF")
+    eStatus.TextColor3 = ESP.enabled and Color3.fromRGB(0, 255, 120) or Color3.fromRGB(255, 150, 150)
+    boxBtn.Text   = "BOX: " .. (ESP.box and "ON" or "OFF")
+    boxBtn.TextColor3 = ESP.box and Color3.fromRGB(0, 255, 120) or Color3.fromRGB(160, 160, 170)
+    chamsBtn.Text = "CHAMS: " .. (ESP.chams and "ON" or "OFF")
+    chamsBtn.TextColor3 = ESP.chams and Color3.fromRGB(0, 255, 120) or Color3.fromRGB(160, 160, 170)
+    nameBtn.Text  = "NAME: " .. (ESP.name and "ON" or "OFF")
+    nameBtn.TextColor3 = ESP.name and Color3.fromRGB(0, 255, 120) or Color3.fromRGB(160, 160, 170)
+    distBtn.Text  = "DISTANCE: " .. (ESP.dist and "ON" or "OFF")
+    distBtn.TextColor3 = ESP.dist and Color3.fromRGB(0, 255, 120) or Color3.fromRGB(160, 160, 170)
+    hpBtn.Text    = "HEALTH: " .. (ESP.health and "ON" or "OFF")
+    hpBtn.TextColor3 = ESP.health and Color3.fromRGB(0, 255, 120) or Color3.fromRGB(160, 160, 170)
+    teamBtn.Text  = "TEAM CHECK: " .. (ESP.teamCheck and "ON" or "OFF")
+    teamBtn.TextColor3 = ESP.teamCheck and Color3.fromRGB(0, 255, 120) or Color3.fromRGB(160, 160, 170)
+    exBtn.Text    = "SHOW EXCLUDED: " .. (ESP.showExcluded and "ON" or "OFF")
+    exBtn.TextColor3 = ESP.showExcluded and Color3.fromRGB(0, 255, 120) or Color3.fromRGB(160, 160, 170)
+    local n = 0
+    for _ in pairs(espObjects) do n += 1 end
+    eHint.Text = string.format("players tracked: %d", n)
+    stabBtn.Text = "STABILIZE ON GRAB: " .. (CFG.stabOnGrab and "ON" or "OFF")
+    stabBtn.TextColor3 = CFG.stabOnGrab and Color3.fromRGB(0, 255, 120) or Color3.fromRGB(160, 160, 170)
+end
+refreshESPUI()
+
+task.spawn(function()
+    while sg.Parent do
+        task.wait(0.3)
+        refreshESPUI()
+    end
+end)
+
+--===================== KEYBINDS =====================
+UserInputService.InputBegan:Connect(function(input, gp)
+    if gp or bindingFor then return end
+    if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+    if input.KeyCode == GRAB_KEYBIND then
+        toggleSpamGrab()
+    elseif input.KeyCode == TP_KEYBIND then
+        doTeleport()
+    elseif input.KeyCode == ESP_KEYBIND then
+        ESP.enabled = not ESP.enabled
+    elseif input.KeyCode == Enum.KeyCode.Insert then
+        main.Visible = not main.Visible
+    end
+end)
+
+UserInputService.InputBegan:Connect(function(input, gp)
+    if not bindingFor then return end
+    if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+    if input.KeyCode == Enum.KeyCode.Escape then
+        if bindingFor == "grab" then GRAB_KEYBIND = nil; grabBindBtn.Text = "Grab: None"
+        elseif bindingFor == "esp" then ESP_KEYBIND = nil; eBindBtn.Text = "Key: None"
+        else TP_KEYBIND = nil; tpBindBtn.Text = "TP: None" end
+    else
+        if bindingFor == "grab" then GRAB_KEYBIND = input.KeyCode; grabBindBtn.Text = "Grab: " .. input.KeyCode.Name
+        elseif bindingFor == "esp" then ESP_KEYBIND = input.KeyCode; eBindBtn.Text = "Key: " .. input.KeyCode.Name
+        else TP_KEYBIND = input.KeyCode; tpBindBtn.Text = "TP: " .. input.KeyCode.Name end
+    end
+    bindingFor = nil
+end)
+
+--===================== STATUS LOOP =====================
+task.spawn(function()
+    while sg.Parent do
+        task.wait(0.25)
+        local hrp = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
+        local o = hrp and hrp.Orientation or Vector3.zero
+        stStatus.Text = string.format("%s | %s | yaw=%s",
+            CFG.strafeOn and "ACTIVE" or "off", POSES[CFG.pose].name, YAW_MODES[CFG.yawMode])
+        stHint.Text = string.format("ori=%.0f,%.0f,%.0f | %s%s",
+            o.X, o.Y, o.Z,
+            weldedPlayer() and "WELDED/stabilized" or (CFG.antiFling and "anti-fling armed" or "anti-fling off"),
+            CFG.hold and " | HELD" or (CFG.move and " | WASD" or ""))
+        lockLbl.Text = "LOCK: " .. (CFG.exactName or "none")
+        gHint.Text = spamActive and "SPAMMING GRAB" or "G = toggle spam grab | T = teleport"
+    end
+end)
+
+refreshStrafeList()
+refreshLive()
+print("[TUFF] loaded")
