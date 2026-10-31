@@ -1,0 +1,128 @@
+--[[ TEO // STATE PERSIST TEST v21 ]]
+local Players = game:GetService("Players")
+local RS = game:GetService("ReplicatedStorage")
+local lp = Players.LocalPlayer
+local box, lines, cs = nil, {}, nil
+
+local function log(s)
+    lines[#lines + 1] = tostring(s)
+    while #lines > 40 do table.remove(lines, 1) end
+    if box and box.Parent then box.Text = table.concat(lines, "\n") end
+    print(s)
+end
+
+local gui = Instance.new("ScreenGui")
+gui.ResetOnSpawn = false
+gui.IgnoreGuiInset = true
+gui.Parent = game:GetService("CoreGui")
+local function cr(p, r) local u = Instance.new("UICorner"); u.CornerRadius = UDim.new(0, r); u.Parent = p end
+
+local main = Instance.new("Frame")
+main.Size = UDim2.fromOffset(236, 320)
+main.Position = UDim2.fromOffset(10, 55)
+main.BackgroundColor3 = Color3.fromRGB(15, 15, 19)
+main.BorderSizePixel = 0
+main.Active = true
+main.Draggable = true
+main.Parent = gui
+cr(main, 10)
+
+local lbl = Instance.new("TextLabel")
+lbl.Size = UDim2.new(1, -20, 0, 30)
+lbl.Position = UDim2.fromOffset(10, 6)
+lbl.BackgroundColor3 = Color3.fromRGB(24, 24, 30)
+lbl.BorderSizePixel = 0
+lbl.Font = Enum.Font.Code
+lbl.TextSize = 14
+lbl.TextColor3 = Color3.fromRGB(220, 90, 120)
+lbl.Text = "state: ?"
+lbl.Parent = main
+cr(lbl, 6)
+
+local function mk(text, y, fn)
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(1, -20, 0, 24)
+    b.Position = UDim2.fromOffset(10, y)
+    b.BackgroundColor3 = Color3.fromRGB(34, 34, 44)
+    b.BorderSizePixel = 0
+    b.Font = Enum.Font.GothamBold
+    b.TextSize = 9
+    b.TextColor3 = Color3.fromRGB(215, 215, 228)
+    b.Text = text
+    b.Parent = main
+    cr(b, 5)
+    b.MouseButton1Click:Connect(fn)
+end
+
+mk("SET attr Block + fire", 40, function()
+    local ch = lp.Character
+    if not ch then return end
+    ch:SetAttribute("State", "Block")
+    log("set attr Block  -> immediate: " .. tostring(ch:GetAttribute("State")))
+    if cs then pcall(function() cs:FireServer("Block", true) end) end
+    task.delay(0.4, function()
+        log("after 0.4s: " .. tostring(ch and ch:GetAttribute("State")))
+    end)
+end)
+
+mk("SET attr Fighting", 68, function()
+    local ch = lp.Character
+    if not ch then return end
+    ch:SetAttribute("State", "Fighting")
+    log("set attr Fighting -> immediate: " .. tostring(ch:GetAttribute("State")))
+    task.delay(0.4, function()
+        log("after 0.4s: " .. tostring(ch and ch:GetAttribute("State")))
+    end)
+end)
+
+mk("SET attr Default", 96, function()
+    local ch = lp.Character
+    if ch then ch:SetAttribute("State", "Default"); log("set attr Default") end
+end)
+
+mk("LIST attributes", 124, function()
+    local ch = lp.Character
+    if not ch then return end
+    for k, v in pairs(ch:GetAttributes()) do log("attr " .. k .. " = " .. tostring(v)) end
+end)
+
+mk("CLEAR LOG", 152, function()
+    lines = {}
+    if box then box.Text = "" end
+end)
+
+box = Instance.new("TextBox")
+box.Size = UDim2.new(1, -20, 1, -190)
+box.Position = UDim2.fromOffset(10, 184)
+box.BackgroundColor3 = Color3.fromRGB(9, 9, 12)
+box.BorderSizePixel = 0
+box.Font = Enum.Font.Code
+box.TextSize = 9
+box.TextColor3 = Color3.fromRGB(180, 180, 195)
+box.TextXAlignment = Enum.TextXAlignment.Left
+box.TextYAlignment = Enum.TextYAlignment.Top
+box.TextWrapped = true
+box.MultiLine = true
+box.ClearTextOnFocus = false
+box.TextEditable = false
+box.Text = ""
+box.Parent = main
+cr(box, 6)
+
+task.spawn(function()
+    local ok, re = pcall(function()
+        return RS.Packages.Knit.Services.CombatService:WaitForChild("RE", 20)
+    end)
+    if ok and re then
+        local ok2, r = pcall(function() return re:WaitForChild("ChangeState", 10) end)
+        if ok2 then cs = r; log("ready") end
+    end
+end)
+
+task.spawn(function()
+    while true do
+        task.wait(0.2)
+        local ch = lp.Character
+        if ch then lbl.Text = "state: " .. tostring(ch:GetAttribute("State")) end
+    end
+end)
