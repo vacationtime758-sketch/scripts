@@ -1,0 +1,126 @@
+--[[ TEO // DELTA CAPTURE ]]
+local Players = game:GetService("Players")
+local RS = game:GetService("ReplicatedStorage")
+local UIS = game:GetService("UserInputService")
+local lp = Players.LocalPlayer
+local box, lines = nil, {}
+
+local function log(...)
+    local t = {}
+    for i = 1, select("#", ...) do t[#t + 1] = tostring(select(i, ...)) end
+    local s = table.concat(t, " ")
+    lines[#lines + 1] = s
+    while #lines > 40 do table.remove(lines, 1) end
+    if box and box.Parent then box.Text = table.concat(lines, "\n") end
+    print(s)
+end
+
+local gui = Instance.new("ScreenGui")
+gui.ResetOnSpawn = false
+gui.IgnoreGuiInset = true
+gui.Parent = game:GetService("CoreGui")
+local function cr(p, r) local u = Instance.new("UICorner"); u.CornerRadius = UDim.new(0, r); u.Parent = p end
+
+local main = Instance.new("Frame")
+main.Size = UDim2.new(1, -16, 1, -150)
+main.Position = UDim2.fromOffset(8, 60)
+main.BackgroundColor3 = Color3.fromRGB(15, 15, 19)
+main.BorderSizePixel = 0
+main.Active = true
+main.Draggable = true
+main.Parent = gui
+cr(main, 10)
+
+local copy = Instance.new("TextButton")
+copy.Size = UDim2.fromOffset(70, 22)
+copy.Position = UDim2.new(1, -80, 0, 5)
+copy.BackgroundColor3 = Color3.fromRGB(220, 90, 120)
+copy.BorderSizePixel = 0
+copy.Font = Enum.Font.GothamBold
+copy.TextSize = 10
+copy.TextColor3 = Color3.fromRGB(20, 20, 25)
+copy.Text = "COPY"
+copy.Parent = main
+cr(copy, 5)
+copy.MouseButton1Click:Connect(function()
+    pcall(function() setclipboard(table.concat(lines, "\n")) end)
+    copy.Text = "OK"
+    task.delay(1.5, function() copy.Text = "COPY" end)
+end)
+
+box = Instance.new("TextBox")
+box.Size = UDim2.new(1, -20, 1, -40)
+box.Position = UDim2.fromOffset(10, 32)
+box.BackgroundColor3 = Color3.fromRGB(9, 9, 12)
+box.BorderSizePixel = 0
+box.Font = Enum.Font.Code
+box.TextSize = 10
+box.TextColor3 = Color3.fromRGB(180, 180, 195)
+box.TextXAlignment = Enum.TextXAlignment.Left
+box.TextYAlignment = Enum.TextYAlignment.Top
+box.TextWrapped = true
+box.MultiLine = true
+box.ClearTextOnFocus = false
+box.TextEditable = false
+box.Text = ""
+box.Parent = main
+cr(box, 6)
+
+log("executor: " .. tostring((typeof(identifyexecutor) == "function") and select(1, pcall(identifyexecutor)) or "?"))
+
+task.spawn(function()
+    local ok, re = pcall(function()
+        return RS.Packages.Knit.Services.CombatService:WaitForChild("RE", 20)
+    end)
+    if not ok or not re then log("RE missing"); return end
+
+    local cs = re:FindFirstChild("ChangeState")
+    local td = re:FindFirstChild("TookDamage")
+
+    if td then
+        local ok2, conns = pcall(getconnections, td.OnClientEvent)
+        if ok2 then
+            log("TookDamage connections: " .. #conns)
+            for i = 1, #conns do
+                local old = conns[i].Function
+                conns[i].Function = newcclosure(function(...)
+                    log("INBOUND", ...)
+                    return old(...)
+                end)
+            end
+            log("inbound hooked")
+        else
+            log("getconnections failed")
+        end
+    end
+
+    if cs then
+        local mt = getrawmetatable(game)
+        pcall(setreadonly, mt, false)
+        local oldNC = mt.__namecall
+        hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
+            if self == cs and getnamecallmethod() == "FireServer" then
+                log("CAPTURED", ...)
+            end
+            return oldNC(self, ...)
+        end))
+        log("ChangeState hooked — press F now")
+    end
+end)
+
+-- controller source if possible
+task.spawn(function()
+    local ok, list = pcall(getgc, true)
+    if not ok then return end
+    local hits = 0
+    for _, v in ipairs(list) do
+        if typeof(v) == "function" then
+            local info = debug.getinfo(v)
+            if info and info.source and info.source:find("Combat") then
+                hits = hits + 1
+                if hits <= 5 then log("src: " .. info.source) end
+            end
+        end
+    end
+    log("combat functions in gc: " .. hits)
+end)
