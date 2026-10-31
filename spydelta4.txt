@@ -1,0 +1,102 @@
+--[[ TEO // STRING TABLE EXTRACT ]]
+local box, lines = nil, {}
+
+local function log(s)
+    lines[#lines + 1] = tostring(s)
+    if box and box.Parent then box.Text = table.concat(lines, "\n") end
+    print(s)
+end
+
+local gui = Instance.new("ScreenGui")
+gui.ResetOnSpawn = false
+gui.IgnoreGuiInset = true
+gui.Parent = game:GetService("CoreGui")
+local function cr(p, r) local u = Instance.new("UICorner"); u.CornerRadius = UDim.new(0, r); u.Parent = p end
+
+local main = Instance.new("Frame")
+main.Size = UDim2.new(1, -16, 1, -120)
+main.Position = UDim2.fromOffset(8, 50)
+main.BackgroundColor3 = Color3.fromRGB(15, 15, 19)
+main.BorderSizePixel = 0
+main.Active = true
+main.Draggable = true
+main.Parent = gui
+cr(main, 10)
+
+local copy = Instance.new("TextButton")
+copy.Size = UDim2.fromOffset(80, 24)
+copy.Position = UDim2.new(1, -90, 0, 5)
+copy.BackgroundColor3 = Color3.fromRGB(220, 90, 120)
+copy.BorderSizePixel = 0
+copy.Font = Enum.Font.GothamBold
+copy.TextSize = 10
+copy.TextColor3 = Color3.fromRGB(20, 20, 25)
+copy.Text = "COPY ALL"
+copy.Parent = main
+cr(copy, 5)
+copy.MouseButton1Click:Connect(function()
+    pcall(function() setclipboard(table.concat(lines, "\n")) end)
+    copy.Text = "OK"
+    task.delay(1.5, function() copy.Text = "COPY ALL" end)
+end)
+
+box = Instance.new("TextBox")
+box.Size = UDim2.new(1, -20, 1, -40)
+box.Position = UDim2.fromOffset(10, 34)
+box.BackgroundColor3 = Color3.fromRGB(9, 9, 12)
+box.BorderSizePixel = 0
+box.Font = Enum.Font.Code
+box.TextSize = 9
+box.TextColor3 = Color3.fromRGB(185, 185, 200)
+box.TextXAlignment = Enum.TextXAlignment.Left
+box.TextYAlignment = Enum.TextYAlignment.Top
+box.TextWrapped = true
+box.MultiLine = true
+box.ClearTextOnFocus = false
+box.TextEditable = false
+box.Text = ""
+box.Parent = main
+cr(box, 6)
+
+task.spawn(function()
+    local ok, list = pcall(getgc, true)
+    if not ok then log("getgc failed"); return end
+    log("scanning " .. #list .. " objects")
+
+    local best, bestScore = nil, 0
+    for _, v in ipairs(list) do
+        if typeof(v) == "table" then
+            local n = #v
+            if n > 150 and n < 600 then
+                local score = 0
+                for i = 1, math.min(n, 25) do
+                    if typeof(v[i]) == "string" then score = score + 1 end
+                end
+                if score > bestScore then
+                    bestScore = score
+                    best = v
+                end
+            end
+        end
+    end
+
+    if not best or bestScore < 15 then log("table not found (score " .. bestScore .. ")"); return end
+
+    local n = #best
+    log("candidate: " .. n .. " entries, score " .. bestScore)
+    log("=====================================")
+
+    local shown = 0
+    for i = 1, n do
+        local s = best[i]
+        if typeof(s) == "string" and #s >= 2 and #s <= 60 then
+            if s:match("^[%w_%.:]+$") or s:match("^[%a_]") then
+                log(i .. "  " .. s)
+                shown = shown + 1
+            end
+        end
+        if i % 300 == 0 then task.wait() end
+    end
+    log("=====================================")
+    log("shown " .. shown)
+end)
