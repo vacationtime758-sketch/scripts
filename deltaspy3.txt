@@ -1,0 +1,124 @@
+--[[ TEO // COMBATCLIENT DUMP ]]
+local RS = game:GetService("ReplicatedStorage")
+local box, lines = nil, {}
+local seen = {}
+
+local function log(...)
+    local t = {}
+    for i = 1, select("#", ...) do t[#t + 1] = tostring(select(i, ...)) end
+    local s = table.concat(t, " ")
+    lines[#lines + 1] = s
+    if box and box.Parent then box.Text = table.concat(lines, "\n") end
+    print(s)
+end
+
+local gui = Instance.new("ScreenGui")
+gui.ResetOnSpawn = false
+gui.IgnoreGuiInset = true
+gui.Parent = game:GetService("CoreGui")
+local function cr(p, r) local u = Instance.new("UICorner"); u.CornerRadius = UDim.new(0, r); u.Parent = p end
+
+local main = Instance.new("Frame")
+main.Size = UDim2.new(1, -16, 1, -150)
+main.Position = UDim2.fromOffset(8, 60)
+main.BackgroundColor3 = Color3.fromRGB(15, 15, 19)
+main.BorderSizePixel = 0
+main.Active = true
+main.Draggable = true
+main.Parent = gui
+cr(main, 10)
+
+local copy = Instance.new("TextButton")
+copy.Size = UDim2.fromOffset(70, 22)
+copy.Position = UDim2.new(1, -80, 0, 5)
+copy.BackgroundColor3 = Color3.fromRGB(220, 90, 120)
+copy.BorderSizePixel = 0
+copy.Font = Enum.Font.GothamBold
+copy.TextSize = 10
+copy.TextColor3 = Color3.fromRGB(20, 20, 25)
+copy.Text = "COPY"
+copy.Parent = main
+cr(copy, 5)
+copy.MouseButton1Click:Connect(function()
+    pcall(function() setclipboard(table.concat(lines, "\n")) end)
+    copy.Text = "OK"
+    task.delay(1.5, function() copy.Text = "COPY" end)
+end)
+
+box = Instance.new("TextBox")
+box.Size = UDim2.new(1, -20, 1, -40)
+box.Position = UDim2.fromOffset(10, 32)
+box.BackgroundColor3 = Color3.fromRGB(9, 9, 12)
+box.BorderSizePixel = 0
+box.Font = Enum.Font.Code
+box.TextSize = 9
+box.TextColor3 = Color3.fromRGB(180, 180, 195)
+box.TextXAlignment = Enum.TextXAlignment.Left
+box.TextYAlignment = Enum.TextYAlignment.Top
+box.TextWrapped = true
+box.MultiLine = true
+box.ClearTextOnFocus = false
+box.TextEditable = false
+box.Text = ""
+box.Parent = main
+cr(box, 6)
+
+local function add(s)
+    if seen[s] then return end
+    seen[s] = true
+    log(s)
+end
+
+task.spawn(function()
+    local ok, mod = pcall(function()
+        return RS:WaitForChild("Controllers", 15):WaitForChild("CombatClient", 15)
+    end)
+    if not ok or not mod then log("module missing"); return end
+
+    log("class: " .. mod.ClassName .. "  srclen: " .. tostring(#mod.Source))
+
+    if typeof(decompile) == "function" then
+        local ok2, src = pcall(decompile, mod)
+        if ok2 and typeof(src) == "string" then
+            log("=== DECOMPILED (" .. #src .. ") ===")
+            for i = 1, #src, 4000 do log(src:sub(i, i + 3999)) end
+            return
+        else
+            log("decompile failed")
+        end
+    else
+        log("no decompile")
+    end
+
+    local ok3, tbl = pcall(require, mod)
+    if ok3 and typeof(tbl) == "table" then
+        log("=== EXPORTED KEYS ===")
+        for k in pairs(tbl) do add("key: " .. tostring(k)) end
+    else
+        log("require failed")
+    end
+
+    log("=== CONSTANTS / UPVALUES ===")
+    local ok4, list = pcall(getgc, true)
+    if not ok4 then log("getgc failed"); return end
+    for _, v in ipairs(list) do
+        if typeof(v) == "function" then
+            local info = debug.getinfo(v)
+            if info and info.source and info.source:find("CombatClient") then
+                local ok5, c = pcall(debug.getconstants, v)
+                if ok5 and typeof(c) == "table" then
+                    for _, val in ipairs(c) do
+                        if typeof(val) == "string" and #val > 0 and #val < 40 then add("const: " .. val) end
+                    end
+                end
+                local ok6, u = pcall(debug.getupvalues, v)
+                if ok6 and typeof(u) == "table" then
+                    for _, val in ipairs(u) do
+                        if typeof(val) == "string" and #val < 40 then add("up: " .. val) end
+                    end
+                end
+            end
+        end
+    end
+    log("=== done ===")
+end)
