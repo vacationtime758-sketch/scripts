@@ -1,0 +1,446 @@
+--==================================================================
+--  CANNON TP  |  lists every cannon, pick one, go to it
+--  minimize -> black circle with cannon symbol
+--  bind is rebindable and won't fire while rebinding
+--==================================================================
+print("[CANNON] loading")
+
+local cloneref = cloneref or function(o) return o end
+local gethui = gethui or function() return game:GetService("CoreGui") end
+
+local Players     = cloneref(game:GetService("Players"))
+local RunService  = cloneref(game:GetService("RunService"))
+local UIS         = cloneref(game:GetService("UserInputService"))
+local Tween       = cloneref(game:GetService("TweenService"))
+local Workspace   = game:GetService("Workspace")
+local lp          = Players.LocalPlayer
+
+local ORANGE = Color3.fromRGB(255, 150, 40)
+local ORANGE_DIM = Color3.fromRGB(160, 95, 25)
+
+local selected = nil
+local bindKey = Enum.KeyCode.C
+local rebinding = false
+local teleporting = false
+local rows = {}
+local refreshTimer = 0
+
+--===================== GUI =====================
+local sg = Instance.new("ScreenGui")
+sg.Name = "CannonTP"
+sg.ResetOnSpawn = false
+sg.IgnoreGuiInset = true
+sg.DisplayOrder = 999999
+pcall(function() sg.Parent = gethui() end)
+if not sg.Parent then sg.Parent = lp:WaitForChild("PlayerGui") end
+
+local Frame = Instance.new("Frame")
+Frame.Size = UDim2.new(0, 290, 0, 430)
+Frame.Position = UDim2.new(0.5, -145, 0.2, 0)
+Frame.BackgroundColor3 = Color3.fromRGB(14, 14, 17)
+Frame.BorderSizePixel = 0
+Frame.Active = true
+Frame.Parent = sg
+Instance.new("UICorner", Frame).CornerRadius = UDim.new(0, 12)
+local fs = Instance.new("UIStroke", Frame)
+fs.Color = ORANGE
+fs.Thickness = 1.5
+fs.Transparency = 0.45
+
+local TitleBar = Instance.new("Frame")
+TitleBar.Size = UDim2.new(1, 0, 0, 34)
+TitleBar.BackgroundColor3 = Color3.fromRGB(24, 24, 28)
+TitleBar.BorderSizePixel = 0
+TitleBar.Parent = Frame
+Instance.new("UICorner", TitleBar).CornerRadius = UDim.new(0, 12)
+
+local TitleFix = Instance.new("Frame")
+TitleFix.Size = UDim2.new(1, 0, 0, 8)
+TitleFix.Position = UDim2.new(0, 0, 1, -8)
+TitleFix.BackgroundColor3 = Color3.fromRGB(24, 24, 28)
+TitleFix.BorderSizePixel = 0
+TitleFix.Parent = TitleBar
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, -70, 1, 0)
+Title.Position = UDim2.new(0, 14, 0, 0)
+Title.BackgroundTransparency = 1
+Title.Text = "CANNON TP"
+Title.TextColor3 = ORANGE
+Title.Font = Enum.Font.GothamBlack
+Title.TextSize = 16
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Parent = TitleBar
+
+local MinBtn = Instance.new("TextButton")
+MinBtn.Size = UDim2.new(0, 26, 0, 26)
+MinBtn.Position = UDim2.new(1, -34, 0, 4)
+MinBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 46)
+MinBtn.Text = "—"
+MinBtn.TextColor3 = ORANGE
+MinBtn.Font = Enum.Font.GothamBlack
+MinBtn.TextSize = 16
+MinBtn.Parent = TitleBar
+Instance.new("UICorner", MinBtn).CornerRadius = UDim.new(0, 7)
+
+-- minimized circle
+local Circle = Instance.new("TextButton")
+Circle.Size = UDim2.new(0, 54, 0, 54)
+Circle.Position = UDim2.new(0.5, -145, 0.2, 0)
+Circle.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+Circle.BorderSizePixel = 0
+Circle.Text = ""
+Circle.Visible = false
+Circle.Active = true
+Circle.Parent = sg
+Instance.new("UICorner", Circle).CornerRadius = UDim.new(1, 0)
+local cs = Instance.new("UIStroke", Circle)
+cs.Color = ORANGE
+cs.Thickness = 2
+
+local CircleIcon = Instance.new("TextLabel")
+CircleIcon.Size = UDim2.new(1, 0, 1, 0)
+CircleIcon.BackgroundTransparency = 1
+CircleIcon.Text = "◉"
+CircleIcon.TextColor3 = ORANGE
+CircleIcon.Font = Enum.Font.GothamBlack
+CircleIcon.TextSize = 28
+CircleIcon.Parent = Circle
+
+--===================== DRAG =====================
+local function draggable(obj, handle)
+    local dragging, startPos, dragStart, moved = false, nil, nil, false
+    handle.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1
+        or i.UserInputType == Enum.UserInputType.Touch then
+            dragging, moved = true, false
+            dragStart, startPos = i.Position, obj.Position
+            i.Changed:Connect(function()
+                if i.UserInputState == Enum.UserInputState.End then dragging = false end
+            end)
+        end
+    end)
+    UIS.InputChanged:Connect(function(i)
+        if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement
+        or i.UserInputType == Enum.UserInputType.Touch) then
+            local d = i.Position - dragStart
+            if math.abs(d.X) > 4 or math.abs(d.Y) > 4 then moved = true end
+            obj.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X,
+                                     startPos.Y.Scale, startPos.Y.Offset + d.Y)
+        end
+    end)
+    return function() return moved end
+end
+draggable(Frame, TitleBar)
+local circleMoved = draggable(Circle, Circle)
+
+MinBtn.MouseButton1Click:Connect(function()
+    Circle.Position = UDim2.new(Frame.Position.X.Scale, Frame.Position.X.Offset,
+                                Frame.Position.Y.Scale, Frame.Position.Y.Offset)
+    Frame.Visible = false
+    Circle.Visible = true
+end)
+
+Circle.MouseButton1Click:Connect(function()
+    if circleMoved() then return end
+    Frame.Position = UDim2.new(Circle.Position.X.Scale, Circle.Position.X.Offset,
+                               Circle.Position.Y.Scale, Circle.Position.Y.Offset)
+    Circle.Visible = false
+    Frame.Visible = true
+end)
+
+--===================== BODY =====================
+local status = Instance.new("TextLabel")
+status.Size = UDim2.new(1, -20, 0, 18)
+status.Position = UDim2.new(0, 10, 0, 40)
+status.BackgroundTransparency = 1
+status.Text = "Scanning..."
+status.TextColor3 = Color3.fromRGB(180, 180, 190)
+status.Font = Enum.Font.Code
+status.TextSize = 11
+status.TextXAlignment = Enum.TextXAlignment.Left
+status.Parent = Frame
+
+local listHeader = Instance.new("TextLabel")
+listHeader.Size = UDim2.new(1, -20, 0, 16)
+listHeader.Position = UDim2.new(0, 10, 0, 62)
+listHeader.BackgroundTransparency = 1
+listHeader.Text = "SELECT A CANNON"
+listHeader.TextColor3 = ORANGE
+listHeader.Font = Enum.Font.GothamBlack
+listHeader.TextSize = 10
+listHeader.TextXAlignment = Enum.TextXAlignment.Left
+listHeader.Parent = Frame
+
+local list = Instance.new("ScrollingFrame")
+list.Size = UDim2.new(1, -20, 0, 200)
+list.Position = UDim2.new(0, 10, 0, 82)
+list.BackgroundColor3 = Color3.fromRGB(9, 9, 12)
+list.BorderSizePixel = 0
+list.ScrollBarThickness = 4
+list.ScrollBarImageColor3 = ORANGE
+list.CanvasSize = UDim2.new(0, 0, 0, 0)
+list.Parent = Frame
+Instance.new("UICorner", list).CornerRadius = UDim.new(0, 8)
+
+--===================== LOGIC =====================
+local function getRoot()
+    local char = lp.Character
+    if not char then char = lp.CharacterAdded:Wait() end
+    return char:WaitForChild("HumanoidRootPart", 3)
+end
+
+local function resolvePart(obj)
+    if not obj or not obj.Parent then return nil end
+    if obj:IsA("BasePart") then return obj end
+    if obj.PrimaryPart then return obj.PrimaryPart end
+    for _, p in ipairs(obj:GetDescendants()) do
+        if p:IsA("BasePart") then return p end
+    end
+    return nil
+end
+
+local function findCannons()
+    local found = {}
+    for _, obj in ipairs(Workspace:GetDescendants()) do
+        if obj:IsA("Model") or obj:IsA("BasePart") then
+            local n = obj.Name:lower()
+            if (n:find("cannon") or n:find("cañon")) and not n:find("fito") then
+                local dup = false
+                for _, ex in ipairs(found) do
+                    if obj:IsDescendantOf(ex) or ex:IsDescendantOf(obj) then
+                        dup = true
+                        break
+                    end
+                end
+                if not dup then table.insert(found, obj) end
+            end
+        end
+    end
+    return found
+end
+
+local function activate(obj)
+    if not obj or not obj.Parent then return false end
+
+    -- search the object, then walk up a couple of ancestors
+    local searchRoots = { obj }
+    local up = obj.Parent
+    for _ = 1, 2 do
+        if up and up ~= Workspace then
+            table.insert(searchRoots, up)
+            up = up.Parent
+        end
+    end
+
+    for _, root in ipairs(searchRoots) do
+        local prompt = root:FindFirstChildWhichIsA("ProximityPrompt", true)
+        if prompt and fireproximityprompt then
+            pcall(fireproximityprompt, prompt)
+            return true
+        end
+        local click = root:FindFirstChildWhichIsA("ClickDetector", true)
+        if click and fireclickdetector then
+            pcall(fireclickdetector, click)
+            return true
+        end
+    end
+
+    local part = resolvePart(obj)
+    if part and firetouchinterest then
+        local hrp = getRoot()
+        if hrp then
+            pcall(firetouchinterest, hrp, part, 0)
+            task.wait(0.05)
+            pcall(firetouchinterest, hrp, part, 1)
+            return true
+        end
+    end
+    return false
+end
+
+local function goToSelected()
+    if teleporting then return end
+    if not selected or not selected.Parent then
+        status.Text = "No cannon selected"
+        status.TextColor3 = Color3.fromRGB(255, 120, 120)
+        return
+    end
+
+    local part = resolvePart(selected)
+    local hrp = getRoot()
+    if not part or not hrp then
+        status.Text = "Cannon has no part"
+        status.TextColor3 = Color3.fromRGB(255, 120, 120)
+        return
+    end
+
+    teleporting = true
+    status.Text = "Going to " .. selected.Name
+    status.TextColor3 = ORANGE
+
+    hrp.CFrame = part.CFrame + Vector3.new(0, 4, 0)
+    task.spawn(function()
+        local hum = lp.Character and lp.Character:FindFirstChildOfClass("Humanoid")
+        if hum and hrp then hrp.AssemblyLinearVelocity = Vector3.zero end
+    end)
+    task.wait(0.12)
+
+    local ok = activate(selected)
+    status.Text = ok and ("Activated " .. selected.Name) or ("At " .. selected.Name .. " (no prompt found)")
+    status.TextColor3 = ok and Color3.fromRGB(120, 240, 130) or Color3.fromRGB(255, 190, 90)
+    task.wait(0.15)
+    teleporting = false
+end
+
+local function renderList()
+    for _, c in ipairs(list:GetChildren()) do
+        if c:IsA("TextButton") then c:Destroy() end
+    end
+    rows = {}
+
+    local cannons = findCannons()
+    local hrp = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
+
+    if #cannons == 0 then
+        status.Text = "No cannons found in this map"
+        status.TextColor3 = Color3.fromRGB(255, 120, 120)
+    else
+        status.Text = string.format("%d cannon(s) found", #cannons)
+        status.TextColor3 = Color3.fromRGB(180, 180, 190)
+    end
+
+    if selected and not selected.Parent then selected = nil end
+
+    for i, obj in ipairs(cannons) do
+        local part = resolvePart(obj)
+        local dist = ""
+        if part and hrp then
+            dist = string.format("  [%d]", math.floor((part.Position - hrp.Position).Magnitude))
+        end
+
+        local b = Instance.new("TextButton")
+        b.Size = UDim2.new(1, -6, 0, 28)
+        b.Position = UDim2.new(0, 3, 0, (i - 1) * 30)
+        b.BackgroundColor3 = (selected == obj) and Color3.fromRGB(70, 42, 12) or Color3.fromRGB(24, 24, 30)
+        b.TextColor3 = (selected == obj) and ORANGE or Color3.fromRGB(220, 220, 230)
+        b.Font = Enum.Font.GothamBold
+        b.TextSize = 11
+        b.TextXAlignment = Enum.TextXAlignment.Left
+        b.Text = string.format("%d. %s%s", i, obj.Name, dist)
+        b.Parent = list
+        Instance.new("UICorner", b).CornerRadius = UDim.new(0, 6)
+
+        b.MouseButton1Click:Connect(function()
+            selected = obj
+            status.Text = "Selected: " .. obj.Name
+            status.TextColor3 = ORANGE
+            renderList()
+        end)
+
+        rows[obj] = b
+    end
+
+    list.CanvasSize = UDim2.new(0, 0, 0, math.max(0, #cannons * 30))
+end
+
+--===================== CONTROLS =====================
+local goBtn = Instance.new("TextButton")
+goBtn.Size = UDim2.new(1, -20, 0, 34)
+goBtn.Position = UDim2.new(0, 10, 0, 292)
+goBtn.BackgroundColor3 = Color3.fromRGB(45, 90, 45)
+goBtn.Text = "GO TO SELECTED"
+goBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+goBtn.Font = Enum.Font.GothamBlack
+goBtn.TextSize = 13
+goBtn.Parent = Frame
+Instance.new("UICorner", goBtn).CornerRadius = UDim.new(0, 8)
+
+local bindBtn = Instance.new("TextButton")
+bindBtn.Size = UDim2.new(0.48, 0, 0, 30)
+bindBtn.Position = UDim2.new(0, 10, 0, 334)
+bindBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 46)
+bindBtn.Text = "BIND: " .. bindKey.Name
+bindBtn.TextColor3 = ORANGE
+bindBtn.Font = Enum.Font.GothamBold
+bindBtn.TextSize = 12
+bindBtn.Parent = Frame
+Instance.new("UICorner", bindBtn).CornerRadius = UDim.new(0, 7)
+
+local refreshBtn = Instance.new("TextButton")
+refreshBtn.Size = UDim2.new(0.48, 0, 0, 30)
+refreshBtn.Position = UDim2.new(0.52, 0, 0, 334)
+refreshBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 46)
+refreshBtn.Text = "RESCAN"
+refreshBtn.TextColor3 = Color3.fromRGB(220, 220, 230)
+refreshBtn.Font = Enum.Font.GothamBold
+refreshBtn.TextSize = 12
+refreshBtn.Parent = Frame
+Instance.new("UICorner", refreshBtn).CornerRadius = UDim.new(0, 7)
+
+local hint = Instance.new("TextLabel")
+hint.Size = UDim2.new(1, -20, 0, 28)
+hint.Position = UDim2.new(0, 10, 0, 372)
+hint.BackgroundTransparency = 1
+hint.Text = "Click a cannon to select, then GO. Bind is rebindable.\nInsert hides the panel."
+hint.TextColor3 = Color3.fromRGB(130, 130, 145)
+hint.Font = Enum.Font.Gotham
+hint.TextSize = 10
+hint.TextXAlignment = Enum.TextXAlignment.Left
+hint.TextYAlignment = Enum.TextYAlignment.Top
+hint.Parent = Frame
+
+goBtn.MouseButton1Click:Connect(goToSelected)
+refreshBtn.MouseButton1Click:Connect(renderList)
+
+bindBtn.MouseButton1Click:Connect(function()
+    if rebinding then return end
+    rebinding = true
+    bindBtn.Text = "PRESS A KEY..."
+    bindBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+end)
+
+--===================== INPUT =====================
+UIS.InputBegan:Connect(function(input, gp)
+    if gp then return end
+    if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+
+    -- rebind swallows the key so it never fires the action
+    if rebinding then
+        if input.KeyCode == Enum.KeyCode.Escape then
+            bindKey = nil
+            bindBtn.Text = "BIND: NONE"
+        else
+            bindKey = input.KeyCode
+            bindBtn.Text = "BIND: " .. input.KeyCode.Name
+        end
+        bindBtn.TextColor3 = ORANGE
+        rebinding = false
+        return
+    end
+
+    if bindKey and input.KeyCode == bindKey then
+        goToSelected()
+    elseif input.KeyCode == Enum.KeyCode.Insert then
+        if Frame.Visible then
+            Frame.Visible = false
+            Circle.Visible = true
+        else
+            Circle.Visible = false
+            Frame.Visible = true
+        end
+    end
+end)
+
+--===================== AUTO REFRESH =====================
+renderList()
+
+RunService.Heartbeat:Connect(function(dt)
+    refreshTimer += dt
+    if refreshTimer >= 3 then
+        refreshTimer = 0
+        if Frame.Visible then renderList() end
+    end
+end)
+
+print("[CANNON] loaded")
