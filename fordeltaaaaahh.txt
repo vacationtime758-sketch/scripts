@@ -1,0 +1,135 @@
+--[[ TEO // INPUT INJECTION TEST v28 ]]
+local Players = game:GetService("Players")
+local UIS = game:GetService("UserInputService")
+local VIM = game:GetService("VirtualInputManager")
+local lp = Players.LocalPlayer
+local box, lines, hum, anim = nil, {}, nil, nil
+
+local function log(s)
+    lines[#lines + 1] = tostring(s)
+    while #lines > 25 do table.remove(lines, 1) end
+    if box and box.Parent then box.Text = table.concat(lines, "\n") end
+    print(s)
+end
+
+local gui = Instance.new("ScreenGui")
+gui.ResetOnSpawn = false
+gui.IgnoreGuiInset = true
+gui.DisplayOrder = 20
+gui.Parent = game:GetService("CoreGui")
+local function cr(p, r) local u = Instance.new("UICorner"); u.CornerRadius = UDim.new(0, r); u.Parent = p end
+
+local main = Instance.new("Frame")
+main.Size = UDim2.fromOffset(230, 240)
+main.Position = UDim2.fromOffset(10, 70)
+main.BackgroundColor3 = Color3.fromRGB(15, 15, 19)
+main.BorderSizePixel = 0
+main.Active = true
+main.Draggable = true
+main.Parent = gui
+cr(main, 10)
+
+local lbl = Instance.new("TextLabel")
+lbl.Size = UDim2.new(1, -20, 0, 18)
+lbl.Position = UDim2.fromOffset(10, 4)
+lbl.BackgroundTransparency = 1
+lbl.Font = Enum.Font.Code
+lbl.TextSize = 9
+lbl.TextColor3 = Color3.fromRGB(220, 90, 120)
+lbl.Text = "keypress=" .. tostring(keypress) .. "  keyrelease=" .. tostring(keyrelease)
+lbl.Parent = main
+
+local function mk(text, y, fn)
+    local b = Instance.new("TextButton")
+    b.Size = UDim2.new(1, -20, 0, 26)
+    b.Position = UDim2.fromOffset(10, y)
+    b.BackgroundColor3 = Color3.fromRGB(34, 34, 44)
+    b.BorderSizePixel = 0
+    b.Font = Enum.Font.GothamBold
+    b.TextSize = 9
+    b.TextColor3 = Color3.fromRGB(215, 215, 228)
+    b.Text = text
+    b.Parent = main
+    cr(b, 5)
+    b.MouseButton1Click:Connect(fn)
+end
+
+mk("1. VIM SendKeyDown/Up", 24, function()
+    pcall(function()
+        VIM:SendKeyDown(Enum.KeyCode.F, true)
+        task.delay(0.4, function() pcall(function() VIM:SendKeyUp(Enum.KeyCode.F) end) end)
+    end)
+    log("1 fired")
+end)
+
+mk("2. VIM SendKeyEvent", 54, function()
+    pcall(function()
+        VIM:SendKeyEvent(true, Enum.KeyCode.F, false, game)
+        task.delay(0.4, function() pcall(function() VIM:SendKeyEvent(false, Enum.KeyCode.F, false, game) end) end)
+    end)
+    log("2 fired")
+end)
+
+mk("3. keypress", 84, function()
+    if keypress then
+        pcall(keypress, "f")
+        task.delay(0.4, function() if keyrelease then pcall(keyrelease, "f") end end)
+        log("3 fired")
+    else
+        log("3 unavailable")
+    end
+end)
+
+mk("4. VIM keyboard 4-arg", 114, function()
+    pcall(function()
+        VIM:SendKeyDown(Enum.KeyCode.F, false, game)
+        task.delay(0.4, function() pcall(function() VIM:SendKeyUp(Enum.KeyCode.F, false, game) end) end)
+    end)
+    log("4 fired")
+end)
+
+box = Instance.new("TextBox")
+box.Size = UDim2.new(1, -20, 1, -150)
+box.Position = UDim2.fromOffset(10, 146)
+box.BackgroundColor3 = Color3.fromRGB(9, 9, 12)
+box.BorderSizePixel = 0
+box.Font = Enum.Font.Code
+box.TextSize = 9
+box.TextColor3 = Color3.fromRGB(180, 180, 195)
+box.TextXAlignment = Enum.TextXAlignment.Left
+box.TextYAlignment = Enum.TextYAlignment.Top
+box.TextWrapped = true
+box.MultiLine = true
+box.ClearTextOnFocus = false
+box.TextEditable = false
+box.Text = ""
+box.Parent = main
+cr(box, 6)
+
+task.spawn(function()
+    local ch = lp.Character or lp.CharacterAdded:Wait()
+    hum = ch:WaitForChild("Humanoid", 8)
+    anim = hum and hum:FindFirstChildOfClass("Animator")
+    if anim then
+        anim.AnimationPlayed:Connect(function(t)
+            local n = (t.Animation and t.Animation.Name) or "?"
+            log("GAME PLAYED: " .. n)
+        end)
+    end
+    local ok, re = pcall(function()
+        return game:GetService("ReplicatedStorage").Packages.Knit.Services.CombatService:WaitForChild("RE", 15)
+    end)
+    if ok and re then
+        local ok2, d = pcall(function() return re:WaitForChild("TookDamage", 10) end)
+        if ok2 and d then
+            d.OnClientEvent:Connect(function(v)
+                if typeof(v) == "number" then log(("%.1f%s"):format(v, v <= 2 and "  << HALVED" or "")) end
+            end)
+        end
+    end
+    log("ready")
+end)
+
+UIS.InputBegan:Connect(function(i, gp)
+    if not gp and i.KeyCode == Enum.KeyCode.F then log("--- real F seen ---") end
+end)
